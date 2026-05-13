@@ -141,6 +141,7 @@ type DeployRequest struct {
 	Code      string `json:"code"`
 	Runtime   string `json:"runtime"`
 	TimeoutMs int    `json:"timeout_ms"`
+	Pubspec   *string `json:"pubspec,omitempty"`
 }
 
 func (c *Client) DeployFunction(projectID string, req DeployRequest) (*Function, error) {

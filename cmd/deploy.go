@@ -58,6 +58,18 @@ var deployCmd = &cobra.Command{
 			return fmt.Errorf("failed to read file %s: %w", file, err)
 		}
 
+		// For Dart functions, auto-detect a sibling pubspec.yaml.
+// If present, packages will be resolved server-side at deploy time.
+var pubspec *string
+if runtime == "dart" {
+	pubspecPath := filepath.Join(filepath.Dir(file), "pubspec.yaml")
+	if data, err := os.ReadFile(pubspecPath); err == nil {
+		s := string(data)
+		pubspec = &s
+		fmt.Printf("Found pubspec.yaml — packages will be resolved server-side.\n")
+	}
+}
+
 		if timeoutMs <= 0 {
 			timeoutMs = 10000
 		}
@@ -70,6 +82,7 @@ var deployCmd = &cobra.Command{
 			Code:      string(code),
 			Runtime:   runtime,
 			TimeoutMs: timeoutMs,
+			Pubspec:   pubspec,
 		})
 		if err != nil {
 			return err
@@ -79,6 +92,9 @@ var deployCmd = &cobra.Command{
 		fmt.Printf("   Runtime:  %s\n", fn.Runtime)
 		fmt.Printf("   Timeout:  %dms\n", fn.TimeoutMs)
 		fmt.Printf("   Project:  %s\n", projectID)
+		if pubspec != nil {
+    fmt.Printf("   Pubspec:  uploaded\n")
+		}
 		return nil
 	},
 }
