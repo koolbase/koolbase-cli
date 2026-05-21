@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "kind": "koolbase.snapshot",
+  "source_project_id": "364cafa3-019b-4af5-86da-da182cf1de3a",
+  "created_at": "2026-05-21T19:32:28.336772298Z",
+  "collections": [
+    {
+      "name": "addresses",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "allergy_catalog",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "audit_events",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "country_config",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "profiles",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "symptom_catalog",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_allergies",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_allergy_status",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_preferences",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "users",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "weight_readings",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    }
+  ],
+  "environments": [
+    {
+      "name": "prod",
+      "slug": "prod",
+      "flags": [
+        {
+          "key": "new_onboarding",
+          "enabled": true,
+          "rollout_percentage": 100,
+          "kill_switch": false,
+          "description": "",
+          "rules": []
+        }
+      ],
+      "configs": [],
+      "version_policies": []
+    }
+  ]
+}

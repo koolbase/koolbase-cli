@@ -56,20 +56,46 @@ var snapshotPullCmd = &cobra.Command{
 	},
 }
 
+type resourceDiff struct {
+	Added     []string `json:"added"`
+	Changed   []string `json:"changed"`
+	Unchanged []string `json:"unchanged"`
+}
+
+type envDiff struct {
+	Slug            string       `json:"slug"`
+	Name            string       `json:"name"`
+	Matched         bool         `json:"matched"`
+	Flags           resourceDiff `json:"flags"`
+	Configs         resourceDiff `json:"configs"`
+	VersionPolicies resourceDiff `json:"version_policies"`
+}
+
 type applyResult struct {
-	Applied         int    `json:"applied"`
-	DryRun          bool   `json:"dry_run"`
-	TargetProjectID string `json:"target_project_id"`
-	Diff            struct {
-		Added     []struct {
+	Applied             int      `json:"applied"`
+	DryRun              bool     `json:"dry_run"`
+	TargetProjectID     string   `json:"target_project_id"`
+	SkippedEnvironments []string `json:"skipped_environments"`
+	Diff                struct {
+		Added []struct {
 			Name string `json:"name"`
 		} `json:"added"`
 		Changed []struct {
 			Name string `json:"name"`
 		} `json:"changed"`
-		Unchanged []string `json:"unchanged"`
-		Removed   []string `json:"removed"`
+		Unchanged    []string  `json:"unchanged"`
+		Removed      []string  `json:"removed"`
+		Environments []envDiff `json:"environments"`
 	} `json:"diff"`
+}
+
+func printResourceDiff(label string, rd resourceDiff) {
+	for _, k := range rd.Added {
+		fmt.Printf("    + %s (%s)\n", k, label)
+	}
+	for _, k := range rd.Changed {
+		fmt.Printf("    ~ %s (%s)\n", k, label)
+	}
 }
 
 var snapshotApplyCmd = &cobra.Command{
@@ -102,21 +128,48 @@ var snapshotApplyCmd = &cobra.Command{
 		if res.DryRun {
 			mode = "Dry run against"
 		}
-		fmt.Printf("%s project %s\n", mode, res.TargetProjectID)
-		fmt.Printf("  added:     %d\n", len(res.Diff.Added))
-		fmt.Printf("  changed:   %d\n", len(res.Diff.Changed))
-		fmt.Printf("  unchanged: %d\n", len(res.Diff.Unchanged))
-		if len(res.Diff.Removed) > 0 {
-			fmt.Printf("  removed (reported, not deleted): %v\n", res.Diff.Removed)
-		}
+		fmt.Printf("%s project %s\n\n", mode, res.TargetProjectID)
+
+		fmt.Printf("Collections: %d added · %d changed · %d unchanged\n",
+			len(res.Diff.Added), len(res.Diff.Changed), len(res.Diff.Unchanged))
 		for _, a := range res.Diff.Added {
-			fmt.Printf("    + %s\n", a.Name)
+			fmt.Printf("  + %s\n", a.Name)
 		}
 		for _, ch := range res.Diff.Changed {
-			fmt.Printf("    ~ %s\n", ch.Name)
+			fmt.Printf("  ~ %s\n", ch.Name)
 		}
+		if len(res.Diff.Removed) > 0 {
+			fmt.Printf("  (in target only, left untouched: %v)\n", res.Diff.Removed)
+		}
+
+		if len(res.Diff.Environments) > 0 {
+			fmt.Println("\nEnvironments:")
+			anySkipped := false
+			for _, env := range res.Diff.Environments {
+				if !env.Matched {
+					fmt.Printf("  %s — no matching env in target (skipped)\n", env.Slug)
+					anySkipped = true
+					continue
+				}
+				changes := len(env.Flags.Added) + len(env.Flags.Changed) +
+					len(env.Configs.Added) + len(env.Configs.Changed) +
+					len(env.VersionPolicies.Added) + len(env.VersionPolicies.Changed)
+				if changes == 0 {
+					fmt.Printf("  %s — in sync\n", env.Slug)
+					continue
+				}
+				fmt.Printf("  %s:\n", env.Slug)
+				printResourceDiff("flags", env.Flags)
+				printResourceDiff("configs", env.Configs)
+				printResourceDiff("version policies", env.VersionPolicies)
+			}
+			if anySkipped {
+				fmt.Println("  → create matching environments (by slug) in the target to promote their config.")
+			}
+		}
+
 		if !res.DryRun {
-			fmt.Printf("\n%d collection(s) applied.\n", res.Applied)
+			fmt.Printf("\n%d resource(s) applied.\n", res.Applied)
 		}
 		return nil
 	},

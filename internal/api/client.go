@@ -483,3 +483,60 @@ func (c *Client) SnapshotApply(projectID string, snapshot json.RawMessage, dryRu
 	}
 	return data, nil
 }
+
+// ─── Secrets ───────────────────────────────────────────────────────────────
+
+type Secret struct {
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func (c *Client) ListSecrets(projectID string) ([]Secret, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/secrets", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list secrets: %s", string(data))
+	}
+	// Tolerate both a bare array and a {"secrets": [...]} envelope.
+	var secrets []Secret
+	if err := json.Unmarshal(data, &secrets); err == nil {
+		return secrets, nil
+	}
+	var wrapped struct {
+		Secrets []Secret `json:"secrets"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Secrets, nil
+}
+
+func (c *Client) UpsertSecret(projectID, name, value string) error {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/secrets", map[string]string{
+		"name":  name,
+		"value": value,
+	})
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("failed to save secret: %s", errResp.Error)
+	}
+	return nil
+}
+
+func (c *Client) DeleteSecret(projectID, name string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/secrets/"+name, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("failed to delete secret: %s", string(data))
+	}
+	return nil
+}
