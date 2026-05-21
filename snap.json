@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "kind": "koolbase.snapshot",
+  "source_project_id": "2abeba84-b76e-40ec-9ed5-5e1dcc50bf28",
+  "created_at": "2026-05-21T17:46:43.743243263Z",
+  "collections": [
+    {
+      "name": "addresses",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "allergy_catalog",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "audit_events",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "country_config",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "profiles",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "symptom_catalog",
+      "read_rule": "public",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_allergies",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_allergy_status",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "user_preferences",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "users",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    },
+    {
+      "name": "weight_readings",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "all",
+      "rule_conditions": []
+    }
+  ]
+}

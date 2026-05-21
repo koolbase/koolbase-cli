@@ -31,7 +31,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(loginCmd, snapshotCmd)
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(invokeCmd)
 	rootCmd.AddCommand(logsCmd)

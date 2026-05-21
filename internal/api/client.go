@@ -455,3 +455,31 @@ func (c *Client) UpdateBundleChecksum(appID, bundleID, checksum string, sizeByte
 	}
 	return nil
 }
+
+// ─── Snapshot ──────────────────────────────────────────────────────────────
+
+func (c *Client) SnapshotPull(projectID string) ([]byte, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/snapshot", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("snapshot pull failed (%d): %s", status, string(data))
+	}
+	return data, nil
+}
+
+func (c *Client) SnapshotApply(projectID string, snapshot json.RawMessage, dryRun bool) ([]byte, error) {
+	path := "/v1/projects/" + projectID + "/snapshot/apply"
+	if dryRun {
+		path += "?dry_run=true"
+	}
+	data, status, err := c.do("POST", path, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("snapshot apply failed (%d): %s", status, string(data))
+	}
+	return data, nil
+}
