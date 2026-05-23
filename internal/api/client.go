@@ -469,10 +469,21 @@ func (c *Client) SnapshotPull(projectID string) ([]byte, error) {
 	return data, nil
 }
 
-func (c *Client) SnapshotApply(projectID string, snapshot json.RawMessage, dryRun bool) ([]byte, error) {
+func (c *Client) SnapshotApply(projectID string, snapshot json.RawMessage, dryRun, prune, force bool) ([]byte, error) {
 	path := "/v1/projects/" + projectID + "/snapshot/apply"
+	sep := "?"
+	add := func(k string) {
+		path += sep + k + "=true"
+		sep = "&"
+	}
 	if dryRun {
-		path += "?dry_run=true"
+		add("dry_run")
+	}
+	if prune {
+		add("prune")
+	}
+	if force {
+		add("force")
 	}
 	data, status, err := c.do("POST", path, snapshot)
 	if err != nil {

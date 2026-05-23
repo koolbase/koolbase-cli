@@ -34,6 +34,8 @@ var (
 	snapshotOutput  string
 	snapshotFile    string
 	snapshotDryRun  bool
+	snapshotPrune   bool
+	snapshotForce   bool
 )
 
 var snapshotPullCmd = &cobra.Command{
@@ -89,8 +91,15 @@ type envDiff struct {
 	VersionPolicies resourceDiff `json:"version_policies"`
 }
 
+type pruneCandidate struct {
+	Name        string `json:"name"`
+	ManagedBy   string `json:"managed_by"`
+	RecordCount int    `json:"record_count"`
+}
+
 type applyResult struct {
 	Applied             int      `json:"applied"`
+	Pruned              int      `json:"pruned"`
 	DryRun              bool     `json:"dry_run"`
 	TargetProjectID     string   `json:"target_project_id"`
 	SkippedEnvironments []string `json:"skipped_environments"`
@@ -105,6 +114,11 @@ type applyResult struct {
 		Removed      []string  `json:"removed"`
 		Environments []envDiff `json:"environments"`
 	} `json:"diff"`
+	Prune *struct {
+		Pruned  []pruneCandidate `json:"pruned"`
+		Blocked []pruneCandidate `json:"blocked"`
+		Kept    []pruneCandidate `json:"kept"`
+	} `json:"prune"`
 }
 
 func printResourceDiff(label string, rd resourceDiff) {
@@ -131,7 +145,7 @@ var snapshotApplyCmd = &cobra.Command{
 		}
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
-		data, err := client.SnapshotApply(snapshotProject, json.RawMessage(raw), snapshotDryRun)
+		data, err := client.SnapshotApply(snapshotProject, json.RawMessage(raw), snapshotDryRun, snapshotPrune, snapshotForce)
 		if err != nil {
 			return err
 		}
@@ -158,6 +172,26 @@ var snapshotApplyCmd = &cobra.Command{
 		}
 		if len(res.Diff.Removed) > 0 {
 			fmt.Printf("  (in target only, left untouched: %v)\n", res.Diff.Removed)
+			if !snapshotPrune {
+				fmt.Println("  → run with --prune to delete manifest-owned ones (collections holding records also need --force)")
+			}
+		}
+
+		if res.Prune != nil {
+			fmt.Println("\nPrune:")
+			for _, p := range res.Prune.Pruned {
+				verb := "will delete"
+				if !res.DryRun {
+					verb = "deleted"
+				}
+				fmt.Printf("  - %s — %s (%d records)\n", p.Name, verb, p.RecordCount)
+			}
+			for _, p := range res.Prune.Blocked {
+				fmt.Printf("  ! %s — BLOCKED: holds %d records (re-run with --force to delete)\n", p.Name, p.RecordCount)
+			}
+			for _, p := range res.Prune.Kept {
+				fmt.Printf("  · %s — kept (dashboard-owned, not manifest-managed)\n", p.Name)
+			}
 		}
 
 		if len(res.Diff.Environments) > 0 {
@@ -187,7 +221,11 @@ var snapshotApplyCmd = &cobra.Command{
 		}
 
 		if !res.DryRun {
-			fmt.Printf("\n%d resource(s) applied.\n", res.Applied)
+			fmt.Printf("\n%d resource(s) applied", res.Applied)
+			if res.Pruned > 0 {
+				fmt.Printf(", %d pruned", res.Pruned)
+			}
+			fmt.Println(".")
 		}
 		return nil
 	},
@@ -201,6 +239,8 @@ func init() {
 	snapshotApplyCmd.Flags().StringVar(&snapshotProject, "project", "", "target project ID to apply to (required)")
 	snapshotApplyCmd.Flags().StringVarP(&snapshotFile, "file", "f", defaultManifest, "backend definition file to apply (default: koolbase.json)")
 	snapshotApplyCmd.Flags().BoolVar(&snapshotDryRun, "dry-run", false, "preview the diff without writing")
+	snapshotApplyCmd.Flags().BoolVar(&snapshotPrune, "prune", false, "delete manifest-owned collections that are absent from the file")
+	snapshotApplyCmd.Flags().BoolVar(&snapshotForce, "force", false, "allow prune to delete collections that still hold records")
 	snapshotApplyCmd.MarkFlagRequired("project")
 
 	snapshotCmd.AddCommand(snapshotPullCmd, snapshotApplyCmd)
