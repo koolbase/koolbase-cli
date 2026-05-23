@@ -170,11 +170,9 @@ var snapshotApplyCmd = &cobra.Command{
 		for _, ch := range res.Diff.Changed {
 			fmt.Printf("  ~ %s\n", ch.Name)
 		}
-		if len(res.Diff.Removed) > 0 {
+		if len(res.Diff.Removed) > 0 && !snapshotPrune {
 			fmt.Printf("  (in target only, left untouched: %v)\n", res.Diff.Removed)
-			if !snapshotPrune {
-				fmt.Println("  → run with --prune to delete manifest-owned ones (collections holding records also need --force)")
-			}
+			fmt.Println("  → run with --prune to delete manifest-owned ones (collections holding records also need --force)")
 		}
 
 		if res.Prune != nil {
