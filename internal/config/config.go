@@ -32,24 +32,37 @@ func configPath() (string, error) {
 }
 
 func Load() (*Config, error) {
+	cfg := &Config{}
+
+	// Read the login file if present. Its absence is not an error: CI and
+	// other headless contexts configure entirely through the environment.
 	path, err := configPath()
 	if err != nil {
 		return nil, err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, errors.New("not logged in — run: koolbase login")
+	if data, rerr := os.ReadFile(path); rerr == nil {
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return nil, err
 		}
-		return nil, err
+	} else if !errors.Is(rerr, os.ErrNotExist) {
+		return nil, rerr
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	// Environment overrides the file, so pipelines can inject secrets.
+	if v := os.Getenv("KOOLBASE_API_KEY"); v != "" {
+		cfg.APIKey = v
 	}
-	return &cfg, nil
+	if v := os.Getenv("KOOLBASE_BASE_URL"); v != "" {
+		cfg.BaseURL = v
+	}
+	if v := os.Getenv("KOOLBASE_PROJECT_ID"); v != "" {
+		cfg.ProjectID = v
+	}
+
+	if cfg.APIKey == "" || cfg.BaseURL == "" {
+		return nil, errors.New("not configured — run: koolbase login, or set KOOLBASE_API_KEY and KOOLBASE_BASE_URL")
+	}
+	return cfg, nil
 }
 
 func Save(cfg *Config) error {
