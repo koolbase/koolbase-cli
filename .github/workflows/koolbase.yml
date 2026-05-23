@@ -1,0 +1,37 @@
+name: Koolbase backend
+
+on:
+  pull_request:
+    paths: ["koolbase.json"]
+  push:
+    branches: [main]
+    paths: ["koolbase.json"]
+
+env:
+  KOOLBASE_BASE_URL: https://api.koolbase.com
+  KOOLBASE_API_KEY: ${{ secrets.KOOLBASE_API_KEY }}
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/kennedyowusu/koolbase-cli@latest
+      - name: Plan (dry-run)
+        run: koolbase-cli snapshot apply --project "${{ vars.KOOLBASE_PROD_PROJECT_ID }}" --dry-run
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install github.com/kennedyowusu/koolbase-cli@latest
+      - name: Apply
+        run: koolbase-cli snapshot apply --project "${{ vars.KOOLBASE_PROD_PROJECT_ID }}"
