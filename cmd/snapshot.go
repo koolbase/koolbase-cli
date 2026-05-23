@@ -11,9 +11,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const defaultManifest = "koolbase.json"
+
 var snapshotCmd = &cobra.Command{
 	Use:   "snapshot",
-	Short: "Export and promote project config (collections, access rules) between projects",
+	Short: "Manage your project's backend definition as code",
+	Long: `Treat your backend as code.
+
+'koolbase snapshot pull' exports a project's structural definition — collections,
+access rules, and per-environment flags / config / version policy — into a single
+versioned file (koolbase.json) that you commit to git.
+
+'koolbase snapshot apply' reconciles a target project to that file, idempotently.
+Use --dry-run to preview the diff, and run it in CI to keep projects in sync from
+one reviewed source of truth.
+
+Secrets, OAuth/SMS credentials, and records are never included.`,
 }
 
 var (
@@ -25,7 +38,7 @@ var (
 
 var snapshotPullCmd = &cobra.Command{
 	Use:   "pull",
-	Short: "Export a project's config snapshot to a file (or stdout)",
+	Short: "Export a project's backend definition to a file you commit (default: koolbase.json)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -38,20 +51,25 @@ var snapshotPullCmd = &cobra.Command{
 			return err
 		}
 
-		// pretty-print so saved snapshots diff cleanly in version control
+		// pretty-print so committed definitions diff cleanly in version control
 		var pretty bytes.Buffer
 		if json.Indent(&pretty, data, "", "  ") == nil {
 			data = pretty.Bytes()
 		}
 
-		if snapshotOutput == "" || snapshotOutput == "-" {
+		// "-" means stdout; empty means the default manifest file
+		if snapshotOutput == "-" {
 			fmt.Println(string(data))
 			return nil
 		}
-		if err := os.WriteFile(snapshotOutput, data, 0600); err != nil {
-			return fmt.Errorf("failed to write %s: %w", snapshotOutput, err)
+		out := snapshotOutput
+		if out == "" {
+			out = defaultManifest
 		}
-		fmt.Printf("Snapshot written to %s\n", snapshotOutput)
+		if err := os.WriteFile(out, data, 0600); err != nil {
+			return fmt.Errorf("failed to write %s: %w", out, err)
+		}
+		fmt.Printf("Backend definition written to %s\n", out)
 		return nil
 	},
 }
@@ -100,7 +118,7 @@ func printResourceDiff(label string, rd resourceDiff) {
 
 var snapshotApplyCmd = &cobra.Command{
 	Use:   "apply",
-	Short: "Apply a config snapshot to a project (use --dry-run to preview)",
+	Short: "Reconcile a target project to your backend definition (use --dry-run to preview)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -177,14 +195,13 @@ var snapshotApplyCmd = &cobra.Command{
 
 func init() {
 	snapshotPullCmd.Flags().StringVar(&snapshotProject, "project", "", "project ID to export from (required)")
-	snapshotPullCmd.Flags().StringVarP(&snapshotOutput, "output", "o", "", "output file (default: stdout)")
+	snapshotPullCmd.Flags().StringVarP(&snapshotOutput, "output", "o", "", "output file (default: koolbase.json; use '-' for stdout)")
 	snapshotPullCmd.MarkFlagRequired("project")
 
 	snapshotApplyCmd.Flags().StringVar(&snapshotProject, "project", "", "target project ID to apply to (required)")
-	snapshotApplyCmd.Flags().StringVarP(&snapshotFile, "file", "f", "", "snapshot file to apply (required)")
+	snapshotApplyCmd.Flags().StringVarP(&snapshotFile, "file", "f", defaultManifest, "backend definition file to apply (default: koolbase.json)")
 	snapshotApplyCmd.Flags().BoolVar(&snapshotDryRun, "dry-run", false, "preview the diff without writing")
 	snapshotApplyCmd.MarkFlagRequired("project")
-	snapshotApplyCmd.MarkFlagRequired("file")
 
 	snapshotCmd.AddCommand(snapshotPullCmd, snapshotApplyCmd)
 }
