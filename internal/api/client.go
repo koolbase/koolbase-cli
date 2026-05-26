@@ -467,6 +467,23 @@ func (c *Client) UpdateBundleChecksum(appID, bundleID, checksum string, sizeByte
 	return nil
 }
 
+func (c *Client) SetBundleMandatory(appID, bundleID string, mandatory bool) error {
+	data, status, err := c.do("PATCH", "/v1/apps/"+appID+"/bundles/"+bundleID+"/mandatory", map[string]bool{
+		"mandatory": mandatory,
+	})
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("failed to update mandatory flag: %s", errResp.Error)
+	}
+	return nil
+}
+
+// ─── Snapshot ──────────────────────────────────────────────────────────────
+
 // ─── Snapshot ──────────────────────────────────────────────────────────────
 
 func (c *Client) SnapshotPull(projectID string) ([]byte, error) {

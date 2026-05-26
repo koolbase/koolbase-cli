@@ -210,6 +210,43 @@ var bundleListCmd = &cobra.Command{
 	},
 }
 
+var bundleMandatoryCmd = &cobra.Command{
+	Use:   "update-mandatory",
+	Short: "Set or clear the force-update (mandatory) flag on a bundle",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		appID, _ := cmd.Flags().GetString("app")
+		bundleID, _ := cmd.Flags().GetString("bundle")
+		if appID == "" {
+			return fmt.Errorf("--app is required")
+		}
+		if bundleID == "" {
+			return fmt.Errorf("--bundle is required")
+		}
+		if !cmd.Flags().Changed("mandatory") {
+			return fmt.Errorf("--mandatory is required (use --mandatory to force-on, --mandatory=false to turn off)")
+		}
+		mandatory, _ := cmd.Flags().GetBool("mandatory")
+
+		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		if err := client.SetBundleMandatory(appID, bundleID, mandatory); err != nil {
+			return err
+		}
+		if mandatory {
+			fmt.Printf("  ✓ Bundle %s marked mandatory (force-update)\n", bundleID)
+			fmt.Println("  Clients on older bundles will be required to update on next check")
+		} else {
+			fmt.Printf("  ✓ Bundle %s mandatory flag cleared\n", bundleID)
+		}
+		return nil
+	},
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 type bundleMeta struct {
@@ -431,7 +468,12 @@ func init() {
 
 	bundleListCmd.Flags().String("app", "", "App (project) ID (required)")
 
+	bundleMandatoryCmd.Flags().String("app", "", "App (project) ID (required)")
+	bundleMandatoryCmd.Flags().String("bundle", "", "Bundle ID (required)")
+	bundleMandatoryCmd.Flags().Bool("mandatory", false, "Force-update flag: --mandatory to enable, --mandatory=false to disable (required)")
+
 	bundleCmd.AddCommand(bundleDeployCmd)
 	bundleCmd.AddCommand(bundleRecallCmd)
 	bundleCmd.AddCommand(bundleListCmd)
+	bundleCmd.AddCommand(bundleMandatoryCmd)
 }
