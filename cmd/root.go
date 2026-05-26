@@ -40,5 +40,6 @@ func init() {
 	rootCmd.AddCommand(secretsCmd)
 	rootCmd.AddCommand(bundleCmd)
 	rootCmd.AddCommand(dlqCmd)
+	rootCmd.AddCommand(triggersCmd)
 	rootCmd.AddCommand(pushCmd)
 }

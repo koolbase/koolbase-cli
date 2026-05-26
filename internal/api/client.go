@@ -641,3 +641,112 @@ func (c *Client) DeleteDeadLetter(projectID, id string) error {
 	}
 	return nil
 }
+
+// ─── Triggers ──────────────────────────────────────────────────────────────
+
+type Trigger struct {
+	ID           string `json:"id"`
+	FunctionName string `json:"function_name"`
+	EventType    string `json:"event_type"`
+	Collection   string `json:"collection"`
+	Enabled      bool   `json:"enabled"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type TriggerStat struct {
+	FunctionName string `json:"function_name"`
+	EventType    string `json:"event_type"`
+	Collection   string `json:"collection"`
+	Total        int    `json:"total"`
+	Successes    int    `json:"successes"`
+	Failures     int    `json:"failures"`
+	Timeouts     int    `json:"timeouts"`
+}
+
+func (c *Client) ListTriggers(projectID string) ([]Trigger, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/triggers", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list triggers: %s", string(data))
+	}
+	var triggers []Trigger
+	if err := json.Unmarshal(data, &triggers); err == nil {
+		return triggers, nil
+	}
+	var wrapped struct {
+		Data []Trigger `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Data, nil
+}
+
+func (c *Client) CreateTrigger(projectID, functionName, eventType, collection string) (*Trigger, error) {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/triggers", map[string]string{
+		"function_name": functionName,
+		"event_type":    eventType,
+		"collection":    collection,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 && status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("failed to create trigger: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("failed to create trigger: %s", string(data))
+	}
+	var t Trigger
+	if err := json.Unmarshal(data, &t); err == nil && t.ID != "" {
+		return &t, nil
+	}
+	var wrapped struct {
+		Data Trigger `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err == nil && wrapped.Data.ID != "" {
+		return &wrapped.Data, nil
+	}
+	return &t, nil
+}
+
+func (c *Client) DeleteTrigger(projectID, triggerID string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/triggers/"+triggerID, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("failed to delete trigger: %s", errResp.Error)
+		}
+		return fmt.Errorf("failed to delete trigger: %s", string(data))
+	}
+	return nil
+}
+
+func (c *Client) GetTriggerStats(projectID string) ([]TriggerStat, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/trigger-stats", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to get trigger stats: %s", string(data))
+	}
+	var stats []TriggerStat
+	if err := json.Unmarshal(data, &stats); err == nil {
+		return stats, nil
+	}
+	var wrapped struct {
+		Data []TriggerStat `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Data, nil
+}
