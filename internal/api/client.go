@@ -579,3 +579,65 @@ func (c *Client) DeleteSecret(projectID, name string) error {
 	}
 	return nil
 }
+
+// ─── Dead Letters ──────────────────────────────────────────────────────────
+
+type DeadLetter struct {
+	ID           string `json:"id"`
+	FunctionName string `json:"function_name"`
+	EventType    string `json:"event_type"`
+	Collection   string `json:"collection"`
+	Attempts     int    `json:"attempts"`
+	LastError    string `json:"last_error"`
+	FailedAt     string `json:"failed_at"`
+}
+
+func (c *Client) ListDeadLetters(projectID string, limit int) ([]DeadLetter, error) {
+	path := fmt.Sprintf("/v1/projects/%s/dead-letters?limit=%d", projectID, limit)
+	data, status, err := c.do("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list dead letters: %s", string(data))
+	}
+	// Tolerate both a bare array and a {"data": [...]} envelope.
+	var letters []DeadLetter
+	if err := json.Unmarshal(data, &letters); err == nil {
+		return letters, nil
+	}
+	var wrapped struct {
+		Data []DeadLetter `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Data, nil
+}
+
+func (c *Client) ReplayDeadLetter(projectID, id string) error {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/dead-letters/"+id+"/replay", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return fmt.Errorf("failed to replay dead letter: %s", errResp.Error)
+		}
+		return fmt.Errorf("failed to replay dead letter: %s", string(data))
+	}
+	return nil
+}
+
+func (c *Client) DeleteDeadLetter(projectID, id string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/dead-letters/"+id, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("failed to delete dead letter: %s", string(data))
+	}
+	return nil
+}

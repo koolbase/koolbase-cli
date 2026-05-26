@@ -39,5 +39,6 @@ func init() {
 	rootCmd.AddCommand(cronsCmd)
 	rootCmd.AddCommand(secretsCmd)
 	rootCmd.AddCommand(bundleCmd)
+	rootCmd.AddCommand(dlqCmd)
 	rootCmd.AddCommand(pushCmd)
 }
