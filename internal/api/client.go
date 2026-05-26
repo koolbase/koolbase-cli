@@ -171,11 +171,22 @@ func (c *Client) ListFunctions(projectID string) ([]Function, error) {
 		return nil, fmt.Errorf("failed to list functions: %s", string(data))
 	}
 
-	var fns []Function
+var fns []Function
 	if err := json.Unmarshal(data, &fns); err != nil {
 		return nil, err
 	}
 	return fns, nil
+}
+
+func (c *Client) DeleteFunction(projectID, name string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/functions/"+name, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("failed to delete function: %s", string(data))
+	}
+	return nil
 }
 
 // ─── Invoke ────────────────────────────────────────────────────────────────

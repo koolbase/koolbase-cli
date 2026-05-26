@@ -14,15 +14,14 @@ var functionsCmd = &cobra.Command{
 }
 
 var functionsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all deployed functions in a project",
+	Use:     "list",
+	Short:   "List all deployed functions in a project",
 	Example: `  koolbase functions list --project proj_123`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
-
 		projectID, _ := cmd.Flags().GetString("project")
 		if projectID == "" {
 			if cfg.ProjectID != "" {
@@ -31,19 +30,16 @@ var functionsListCmd = &cobra.Command{
 				return fmt.Errorf("--project is required")
 			}
 		}
-
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		fns, err := client.ListFunctions(projectID)
 		if err != nil {
 			return err
 		}
-
 		if len(fns) == 0 {
 			fmt.Println("No functions deployed yet.")
 			fmt.Println("Deploy one with: koolbase deploy <name> --file <path> --project <id>")
 			return nil
 		}
-
 		fmt.Printf("%-25s %-8s %-10s %-8s %s\n", "NAME", "VERSION", "RUNTIME", "TIMEOUT", "LAST DEPLOYED")
 		fmt.Printf("%-25s %-8s %-10s %-8s %s\n", "----", "-------", "-------", "-------", "-------------")
 		for _, fn := range fns {
@@ -58,7 +54,42 @@ var functionsListCmd = &cobra.Command{
 	},
 }
 
+var functionsDeleteCmd = &cobra.Command{
+	Use:     "delete <name>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a deployed function",
+	Example: `  koolbase functions delete my-fn --project proj_123`,
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		projectID, _ := cmd.Flags().GetString("project")
+		if projectID == "" {
+			if cfg.ProjectID != "" {
+				projectID = cfg.ProjectID
+			} else {
+				return fmt.Errorf("--project is required")
+			}
+		}
+
+		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		if err := client.DeleteFunction(projectID, name); err != nil {
+			return err
+		}
+
+		fmt.Printf("Function %s deleted\n", name)
+		return nil
+	},
+}
+
 func init() {
 	functionsListCmd.Flags().StringP("project", "p", "", "Project ID")
+	functionsDeleteCmd.Flags().StringP("project", "p", "", "Project ID")
+
 	functionsCmd.AddCommand(functionsListCmd)
+	functionsCmd.AddCommand(functionsDeleteCmd)
 }
