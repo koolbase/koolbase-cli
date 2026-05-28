@@ -41,5 +41,6 @@ func init() {
 	rootCmd.AddCommand(bundleCmd)
 	rootCmd.AddCommand(dlqCmd)
 	rootCmd.AddCommand(triggersCmd)
+	rootCmd.AddCommand(uniqueConstraintsCmd)
 	rootCmd.AddCommand(pushCmd)
 }

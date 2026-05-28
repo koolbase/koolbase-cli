@@ -750,3 +750,98 @@ func (c *Client) GetTriggerStats(projectID string) ([]TriggerStat, error) {
 	}
 	return wrapped.Data, nil
 }
+
+// ─── Unique Constraints ──────────────────────────────────────────────────────
+
+type UniqueConstraint struct {
+	ID              string   `json:"id"`
+	ProjectID       string   `json:"project_id"`
+	CollectionID    string   `json:"collection_id"`
+	Fields          []string `json:"fields"`
+	CaseInsensitive bool     `json:"case_insensitive"`
+	CreatedAt       string   `json:"created_at"`
+}
+
+// DuplicateGroup is one set of existing records that already share the same
+// value(s) for a candidate constraint — returned on a 409 so the caller can
+// dedupe before declaring.
+type DuplicateGroup struct {
+	Values []string `json:"values"`
+	Count  int      `json:"count"`
+}
+
+func (c *Client) ListUniqueConstraints(projectID, collection string) ([]UniqueConstraint, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/collections/"+collection+"/unique-constraints", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list unique constraints: %s", string(data))
+	}
+	// Tolerate both a bare array and a {"data": [...]} envelope.
+	var constraints []UniqueConstraint
+	if err := json.Unmarshal(data, &constraints); err == nil {
+		return constraints, nil
+	}
+	var wrapped struct {
+		Data []UniqueConstraint `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Data, nil
+}
+
+// CreateUniqueConstraint declares a unique constraint. On a 409 caused by
+// existing duplicate values it returns the offending groups alongside the
+// error so the caller can print them; the constraint is not created in that
+// case.
+func (c *Client) CreateUniqueConstraint(projectID, collection string, fields []string, caseInsensitive bool) (*UniqueConstraint, []DuplicateGroup, error) {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/collections/"+collection+"/unique-constraints", map[string]interface{}{
+		"fields":           fields,
+		"case_insensitive": caseInsensitive,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if status == 201 {
+		var uc UniqueConstraint
+		if err := json.Unmarshal(data, &uc); err != nil {
+			return nil, nil, err
+		}
+		return &uc, nil, nil
+	}
+	// Non-201: parse the structured error. duplicate_values carries the
+	// offending groups under details.duplicates.
+	var errResp struct {
+		Code    string `json:"code"`
+		Error   string `json:"error"`
+		Details struct {
+			Duplicates []DuplicateGroup `json:"duplicates"`
+		} `json:"details"`
+	}
+	json.Unmarshal(data, &errResp)
+	if errResp.Code == "duplicate_values" {
+		msg := errResp.Error
+		if msg == "" {
+			msg = "collection has duplicate values for these fields"
+		}
+		return nil, errResp.Details.Duplicates, fmt.Errorf("%s", msg)
+	}
+	msg := errResp.Error
+	if msg == "" {
+		msg = string(data)
+	}
+	return nil, nil, fmt.Errorf("failed to declare unique constraint: %s", msg)
+}
+
+func (c *Client) DeleteUniqueConstraint(projectID, collection, constraintID string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/collections/"+collection+"/unique-constraints/"+constraintID, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("failed to delete unique constraint: %s", string(data))
+	}
+	return nil
+}
