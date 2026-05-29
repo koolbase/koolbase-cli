@@ -1,15 +1,15 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "koolbase",
-	Short: "Koolbase CLI — manage your Koolbase project from the terminal",
+	Use:           "koolbase",
+	Short:         "Koolbase CLI — manage your Koolbase project from the terminal",
+	SilenceUsage:  true,
 	Long: `
 ██╗  ██╗ ██████╗  ██████╗ ██╗     ██████╗  █████╗ ███████╗███████╗
 ██║ ██╔╝██╔═══██╗██╔═══██╗██║     ██╔══██╗██╔══██╗██╔════╝██╔════╝
@@ -25,7 +25,6 @@ Docs: https://docs.koolbase.com
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

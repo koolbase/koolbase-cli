@@ -574,10 +574,20 @@ func (c *Client) DeleteSecret(projectID, name string) error {
 	if err != nil {
 		return err
 	}
-	if status != 200 && status != 204 {
-		return fmt.Errorf("failed to delete secret: %s", string(data))
+	if status == 200 || status == 204 {
+		return nil
 	}
-	return nil
+	if status == 404 {
+		return fmt.Errorf("secret %s does not exist", name)
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	json.Unmarshal(data, &errResp)
+	if errResp.Error != "" {
+		return fmt.Errorf("failed to delete secret: %s", errResp.Error)
+	}
+	return fmt.Errorf("failed to delete secret: %s", string(data))
 }
 
 // ─── Dead Letters ──────────────────────────────────────────────────────────
