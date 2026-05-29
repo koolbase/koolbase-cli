@@ -71,19 +71,29 @@ if runtime == "dart" {
 }
 
 		if timeoutMs <= 0 {
-			timeoutMs = 10000
-		}
+												timeoutMs = 10000
+				}
 
-		fmt.Printf("Deploying %s (%s runtime)...\n", name, runtime)
+				// Only send requires_auth when the flag was explicitly set, so a
+				// bare `deploy` doesn't silently flip the stored value on redeploy.
+				var requiresAuth *bool
+				if cmd.Flags().Changed("requires-auth") {
+												v, _ := cmd.Flags().GetBool("requires-auth")
+												requiresAuth = &v
+				}
 
-		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
-		fn, err := client.DeployFunction(projectID, api.DeployRequest{
-			Name:      name,
-			Code:      string(code),
-			Runtime:   runtime,
-			TimeoutMs: timeoutMs,
-			Pubspec:   pubspec,
-		})
+				fmt.Printf("Deploying %s (%s runtime)...\n", name, runtime)
+
+				client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+				fn, err := client.DeployFunction(projectID, api.DeployRequest{
+												Name:         name,
+												Code:         string(code),
+												Runtime:      runtime,
+												TimeoutMs:    timeoutMs,
+												Pubspec:      pubspec,
+												RequiresAuth: requiresAuth,
+				})
+
 		if err != nil {
 			return err
 		}
@@ -92,10 +102,18 @@ if runtime == "dart" {
 		fmt.Printf("   Runtime:  %s\n", fn.Runtime)
 		fmt.Printf("   Timeout:  %dms\n", fn.TimeoutMs)
 		fmt.Printf("   Project:  %s\n", projectID)
+
 		if pubspec != nil {
-    fmt.Printf("   Pubspec:  uploaded\n")
-		}
-		return nil
+                        fmt.Printf("   Pubspec:  uploaded\n")
+                }
+                if requiresAuth != nil {
+                        if *requiresAuth {
+                                fmt.Printf("   Auth:     required\n")
+                        } else {
+                                fmt.Printf("   Auth:     not required\n")
+                        }
+                }
+                return nil
 	},
 }
 
@@ -104,4 +122,5 @@ func init() {
 	deployCmd.Flags().StringP("runtime", "r", "", "Runtime: deno (default) or dart (auto-detected from file extension)")
 	deployCmd.Flags().StringP("project", "p", "", "Project ID")
 	deployCmd.Flags().Int("timeout", 10000, "Execution timeout in milliseconds (max 30000)")
+        deployCmd.Flags().Bool("requires-auth", false, "Reject anonymous SDK/HTTP invocations of this function (omit flag to leave current value unchanged on redeploy)")
 }

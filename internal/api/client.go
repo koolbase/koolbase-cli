@@ -137,11 +137,12 @@ type Function struct {
 }
 
 type DeployRequest struct {
-	Name      string `json:"name"`
-	Code      string `json:"code"`
-	Runtime   string `json:"runtime"`
-	TimeoutMs int    `json:"timeout_ms"`
-	Pubspec   *string `json:"pubspec,omitempty"`
+			Name         string  `json:"name"`
+			Code         string  `json:"code"`
+			Runtime      string  `json:"runtime"`
+			TimeoutMs    int     `json:"timeout_ms"`
+			Pubspec      *string `json:"pubspec,omitempty"`
+			RequiresAuth *bool   `json:"requires_auth,omitempty"`
 }
 
 func (c *Client) DeployFunction(projectID string, req DeployRequest) (*Function, error) {
