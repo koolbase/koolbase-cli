@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -67,7 +68,7 @@ var secretsSetCmd = &cobra.Command{
 	Example: `  koolbase secrets set STRIPE_KEY --value sk_live_xxx --project proj_123
   echo "$STRIPE_KEY" | koolbase secrets set STRIPE_KEY --stdin --project proj_123
   koolbase secrets set STRIPE_KEY --from-file ./stripe.key --project proj_123`,
-	Args:    cobra.ExactArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -117,6 +118,18 @@ var secretsRmCmd = &cobra.Command{
 				projectID = cfg.ProjectID
 			} else {
 				return fmt.Errorf("--project is required")
+			}
+		}
+
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			fmt.Printf("Remove secret %s? This cannot be undone. [y/N]: ", name)
+			reader := bufio.NewReader(os.Stdin)
+			ans, _ := reader.ReadString('\n')
+			ans = strings.TrimSpace(strings.ToLower(ans))
+			if ans != "y" && ans != "yes" {
+				fmt.Println("Cancelled.")
+				return nil
 			}
 		}
 
@@ -199,6 +212,7 @@ func init() {
 	secretsSetCmd.Flags().Bool("stdin", false, "Read the secret value from stdin")
 	secretsSetCmd.Flags().String("from-file", "", "Read the secret value from a file")
 	secretsRmCmd.Flags().StringP("project", "p", "", "Project ID")
+	secretsRmCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	secretsCmd.AddCommand(secretsListCmd)
 	secretsCmd.AddCommand(secretsSetCmd)
