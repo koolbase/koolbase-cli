@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/zip"
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -245,7 +246,43 @@ var bundleMandatoryCmd = &cobra.Command{
 	},
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+var bundleDeleteCmd = &cobra.Command{
+	Use:     "delete <bundle-id>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a draft or recalled bundle (and its R2 artifact)",
+	Example: `  koolbase bundle delete bdl_abc --app proj_123`,
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bundleID := args[0]
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		appID, _ := cmd.Flags().GetString("app")
+		if appID == "" {
+			return fmt.Errorf("--app is required")
+		}
+
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			fmt.Printf("Delete bundle %s and its artifact? This cannot be undone. [y/N]: ", bundleID)
+			reader := bufio.NewReader(os.Stdin)
+			ans, _ := reader.ReadString('\n')
+			ans = strings.TrimSpace(strings.ToLower(ans))
+			if ans != "y" && ans != "yes" {
+				fmt.Println("Cancelled.")
+				return nil
+			}
+		}
+
+		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		if err := client.DeleteBundle(appID, bundleID); err != nil {
+			return err
+		}
+		fmt.Printf("  ✓ Bundle %s deleted\n", bundleID)
+		return nil
+	},
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -462,6 +499,10 @@ func init() {
 	bundleDeployCmd.Flags().String("bundle-dir", "./bundle", "Path to bundle directory")
 	bundleDeployCmd.Flags().Int("rollout", 100, "Rollout percentage 0-100")
 	bundleDeployCmd.Flags().Bool("dry-run", false, "Validate and package without uploading")
+
+bundleDeleteCmd.Flags().String("app", "", "App (project) ID (required)")
+bundleDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+bundleCmd.AddCommand(bundleDeleteCmd)
 
 	bundleRecallCmd.Flags().String("app", "", "App (project) ID (required)")
 	bundleRecallCmd.Flags().String("bundle", "", "Bundle ID to recall (required)")

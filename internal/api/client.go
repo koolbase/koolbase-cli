@@ -855,3 +855,27 @@ func (c *Client) DeleteUniqueConstraint(projectID, collection, constraintID stri
 	}
 	return nil
 }
+
+func (c *Client) DeleteBundle(appID, bundleID string) error {
+	data, status, err := c.do("DELETE", "/v1/apps/"+appID+"/bundles/"+bundleID, nil)
+	if err != nil {
+		return err
+	}
+	if status == 200 || status == 204 {
+		return nil
+	}
+	if status == 404 {
+		return fmt.Errorf("bundle %s does not exist", bundleID)
+	}
+	if status == 409 {
+		return fmt.Errorf("bundle %s is published — recall it first with `koolbase bundle recall`", bundleID)
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	json.Unmarshal(data, &errResp)
+	if errResp.Error != "" {
+		return fmt.Errorf("failed to delete bundle: %s", errResp.Error)
+	}
+	return fmt.Errorf("failed to delete bundle: %s", string(data))
+}
