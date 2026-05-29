@@ -195,15 +195,15 @@ var bundleListCmd = &cobra.Command{
 			fmt.Println("No bundles found")
 			return nil
 		}
-		fmt.Printf("\n  %-10s %-8s %-10s %-12s %-12s %-8s %s\n",
-			"VERSION", "PLATFORM", "CHANNEL", "STATUS", "ROLLOUT", "SIZE", "CREATED")
+		fmt.Printf("\n  %-42s %-10s %-8s %-10s %-12s %-12s %-8s %s\n",
+    "ID", "VERSION", "PLATFORM", "CHANNEL", "STATUS", "ROLLOUT", "SIZE", "CREATED")
 		for _, b := range bundles {
-			fmt.Printf("  v%-9d %-8s %-10s %-12s %-12s %-8s %s\n",
-				b.Version, b.Platform, b.Channel,
-				statusIcon(b.Status),
-				fmt.Sprintf("%d%%", b.RolloutPercentage),
-				humanizeBytes(b.SizeBytes),
-				formatTime(b.CreatedAt),
+			fmt.Printf("  %-42s v%-9d %-8s %-10s %-12s %-12s %-8s %s\n",
+    b.ID, b.Version, b.Platform, b.Channel,
+    statusIcon(b.Status),
+    fmt.Sprintf("%d%%", b.RolloutPercentage),
+    humanizeBytes(b.SizeBytes),
+    formatTime(b.CreatedAt),
 			)
 		}
 		fmt.Println()
