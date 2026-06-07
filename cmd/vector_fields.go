@@ -57,7 +57,7 @@ var vfListCmd = &cobra.Command{
 				}
 				ae = fmt.Sprintf("%s → %s (%s)", *f.EmbeddingProvider, *f.SourceField, model)
 			}
-			fmt.Printf("%-24s %-6d %-10s %s\n", f.Name, f.Dimensions, f.DistanceMetric, ae)
+			fmt.Printf("%-24s %-6d %-10s %s\n", f.FieldName, f.Dimensions, f.DistanceMetric, ae)
 		}
 		return nil
 	},
@@ -118,7 +118,7 @@ The provider must already be configured in this project with status=valid
 		}
 
 		req := api.CreateVectorFieldRequest{
-			Name:           name,
+			FieldName:      name,
 			Dimensions:     dimensions,
 			DistanceMetric: distance,
 		}
@@ -135,7 +135,7 @@ The provider must already be configured in this project with status=valid
 		}
 
 		fmt.Printf("\nVector field declared\n")
-		fmt.Printf("   Name:        %s\n", f.Name)
+		fmt.Printf("   Name:        %s\n", f.FieldName)
 		fmt.Printf("   Collection:  %s\n", collection)
 		fmt.Printf("   Dimensions:  %d\n", f.Dimensions)
 		fmt.Printf("   Distance:    %s\n", f.DistanceMetric)
@@ -209,7 +209,7 @@ You can't change a field's dimensions or distance metric — recreate it for tha
 		}
 
 		fmt.Printf("\nVector field updated\n")
-		fmt.Printf("   Name:       %s\n", f.Name)
+		fmt.Printf("   Name:       %s\n", f.FieldName)
 		fmt.Printf("   Collection: %s\n", collection)
 		if f.EmbeddingProvider != nil && f.SourceField != nil {
 			mn := "—"

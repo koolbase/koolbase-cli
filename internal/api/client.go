@@ -886,7 +886,9 @@ func (c *Client) DeleteBundle(appID, bundleID string) error {
 
 type VectorField struct {
 	ID                string  `json:"id"`
-	Name              string  `json:"name"`
+	ProjectID         string  `json:"project_id"`
+	CollectionID      string  `json:"collection_id"`
+	FieldName         string  `json:"field_name"`
 	Dimensions        int     `json:"dimensions"`
 	DistanceMetric    string  `json:"distance_metric"`
 	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
@@ -896,7 +898,7 @@ type VectorField struct {
 }
 
 type CreateVectorFieldRequest struct {
-	Name              string  `json:"name"`
+	FieldName         string  `json:"field_name"`
 	Dimensions        int     `json:"dimensions"`
 	DistanceMetric    string  `json:"distance_metric,omitempty"`
 	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
