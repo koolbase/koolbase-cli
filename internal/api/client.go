@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -879,4 +880,146 @@ func (c *Client) DeleteBundle(appID, bundleID string) error {
 		return fmt.Errorf("failed to delete bundle: %s", errResp.Error)
 	}
 	return fmt.Errorf("failed to delete bundle: %s", string(data))
+}
+
+// ─── Vector Fields ──────────────────────────────────────────────────────────
+
+type VectorField struct {
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Dimensions        int     `json:"dimensions"`
+	DistanceMetric    string  `json:"distance_metric"`
+	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
+	EmbeddingModel    *string `json:"embedding_model,omitempty"`
+	SourceField       *string `json:"source_field,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+}
+
+type CreateVectorFieldRequest struct {
+	Name              string  `json:"name"`
+	Dimensions        int     `json:"dimensions"`
+	DistanceMetric    string  `json:"distance_metric,omitempty"`
+	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
+	EmbeddingModel    *string `json:"embedding_model,omitempty"`
+	SourceField       *string `json:"source_field,omitempty"`
+}
+
+// UpdateEmbeddingConfigRequest carries the auto-embed triplet for a PATCH.
+// All three nil pointers tells the server to clear auto-embed; otherwise
+// all three must be non-nil (server enforces the all-or-none rule).
+type UpdateEmbeddingConfigRequest struct {
+	EmbeddingProvider *string `json:"embedding_provider"`
+	EmbeddingModel    *string `json:"embedding_model"`
+	SourceField       *string `json:"source_field"`
+}
+
+type EmbedAllResult struct {
+	Scanned         int     `json:"scanned"`
+	Enqueued        int     `json:"enqueued"`
+	SkippedNoSource int     `json:"skipped_no_source"`
+	AlreadyCurrent  int     `json:"already_current"`
+	HasMore         bool    `json:"has_more"`
+	NextCursor      *string `json:"next_cursor,omitempty"`
+}
+
+func (c *Client) ListVectorFields(projectID, collection string) ([]VectorField, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/collections/"+collection+"/vector-fields", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list vector fields: %s", string(data))
+	}
+	var fields []VectorField
+	if err := json.Unmarshal(data, &fields); err == nil {
+		return fields, nil
+	}
+	var wrapped struct {
+		Data []VectorField `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Data, nil
+}
+
+func (c *Client) CreateVectorField(projectID, collection string, req CreateVectorFieldRequest) (*VectorField, error) {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/collections/"+collection+"/vector-fields", req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 && status != 201 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("failed to create vector field: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("failed to create vector field: %s", string(data))
+	}
+	var f VectorField
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (c *Client) UpdateVectorFieldEmbedding(projectID, collection, name string, req UpdateEmbeddingConfigRequest) (*VectorField, error) {
+	data, status, err := c.do("PATCH", "/v1/projects/"+projectID+"/collections/"+collection+"/vector-fields/"+name, req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("failed to update vector field: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("failed to update vector field: %s", string(data))
+	}
+	var f VectorField
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (c *Client) DeleteVectorField(projectID, collection, name string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/collections/"+collection+"/vector-fields/"+name, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("failed to delete vector field: %s", string(data))
+	}
+	return nil
+}
+
+func (c *Client) EmbedAllVectorField(projectID, collection, name string, after *string) (*EmbedAllResult, error) {
+	path := "/v1/projects/" + projectID + "/collections/" + collection + "/vector-fields/" + name + "/embed-all"
+	if after != nil && *after != "" {
+		path += "?after=" + url.QueryEscape(*after)
+	}
+	data, status, err := c.do("POST", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("failed to embed-all: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("failed to embed-all: %s", string(data))
+	}
+	var res EmbedAllResult
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
