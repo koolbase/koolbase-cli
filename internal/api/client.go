@@ -1025,3 +1025,93 @@ func (c *Client) EmbedAllVectorField(projectID, collection, name string, after *
 	}
 	return &res, nil
 }
+
+// LexicalBackfillResult mirrors EmbedAllResult for the lexical-backfill
+// endpoint. Note the response uses `updated` instead of `enqueued` —
+// lexical writes are synchronous so the work is done by the time the
+// page returns.
+type LexicalBackfillResult struct {
+	Scanned         int     `json:"scanned"`
+	Updated         int     `json:"updated"`
+	SkippedNoSource int     `json:"skipped_no_source"`
+	AlreadyCurrent  int     `json:"already_current"`
+	HasMore         bool    `json:"has_more"`
+	NextCursor      *string `json:"next_cursor,omitempty"`
+	JobID           *string `json:"job_id,omitempty"`
+}
+
+func (c *Client) LexicalBackfillVectorField(projectID, collection, name string, after *string, jobID *string) (*LexicalBackfillResult, error) {
+	path := "/v1/projects/" + projectID + "/collections/" + collection + "/vector-fields/" + name + "/lexical-backfill"
+	sep := "?"
+	if after != nil && *after != "" {
+		path += sep + "after=" + url.QueryEscape(*after)
+		sep = "&"
+	}
+	if jobID != nil && *jobID != "" {
+		path += sep + "job_id=" + url.QueryEscape(*jobID)
+	}
+	data, status, err := c.do("POST", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("failed to lexical-backfill: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("failed to lexical-backfill: %s", string(data))
+	}
+	var res LexicalBackfillResult
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// ─── Semantic / Lexical / Hybrid Search ────────────────────────────────────
+
+type SearchSemanticRequest struct {
+	Collection    string                 `json:"collection"`
+	Field         string                 `json:"field"`
+	QueryText     string                 `json:"query_text,omitempty"`
+	QueryVector   []float64              `json:"query_vector,omitempty"`
+	Limit         int                    `json:"limit,omitempty"`
+	Where         map[string]interface{} `json:"where,omitempty"`
+	Mode          string                 `json:"mode,omitempty"`
+	MinSimilarity *float64               `json:"min_similarity,omitempty"`
+}
+
+type SearchHit struct {
+	Record   map[string]interface{} `json:"record"`
+	Distance float64                `json:"distance"`
+}
+
+type SearchSemanticResponse struct {
+	Results []SearchHit `json:"results"`
+	Total   int         `json:"total"`
+}
+
+func (c *Client) SearchSemantic(projectID string, req SearchSemanticRequest) (*SearchSemanticResponse, error) {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/search-semantic", req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(data, &errResp)
+		if errResp.Error != "" {
+			return nil, fmt.Errorf("search failed: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("search failed: %s", string(data))
+	}
+	var resp SearchSemanticResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

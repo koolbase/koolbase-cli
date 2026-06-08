@@ -325,6 +325,179 @@ collection that already has records.`,
 	},
 }
 
+var vfLexicalBackfillCmd = &cobra.Command{
+	Use:   "lexical-backfill <collection> <name>",
+	Short: "Backfill the BM25 lexical index for every record on this vector field",
+	Long: `Walks every record in the collection and populates the lexical
+(BM25) row for any whose source field is populated. Lexical rows are
+written automatically on every insert/update; this command is only
+needed when enabling hybrid or lexical search on a collection that
+already has pre-existing records.
+
+Unlike embed-all, lexical-backfill is synchronous — Postgres handles
+the indexing, no provider calls, no charges. Safe to re-run; records
+whose source text already matches the stored lexical row are skipped.`,
+	Example: `  koolbase vector-fields lexical-backfill articles content_embedding --project proj_123`,
+	Args:    cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		collection := args[0]
+		name := args[1]
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		projectID, _ := cmd.Flags().GetString("project")
+		if projectID == "" {
+			if cfg.ProjectID != "" {
+				projectID = cfg.ProjectID
+			} else {
+				return fmt.Errorf("--project is required")
+			}
+		}
+
+		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		var (
+			totals api.LexicalBackfillResult
+			cursor *string
+			jobID  *string
+			pages  int
+		)
+		fmt.Println("Backfilling lexical index…")
+		for {
+			pages++
+			res, err := client.LexicalBackfillVectorField(projectID, collection, name, cursor, jobID)
+			if err != nil {
+				fmt.Println()
+				return err
+			}
+			totals.Scanned += res.Scanned
+			totals.Updated += res.Updated
+			totals.SkippedNoSource += res.SkippedNoSource
+			totals.AlreadyCurrent += res.AlreadyCurrent
+			if jobID == nil && res.JobID != nil {
+				jobID = res.JobID
+			}
+
+			fmt.Printf("\rpage %d  scanned=%d  updated=%d  skipped_no_source=%d  already_current=%d",
+				pages, totals.Scanned, totals.Updated, totals.SkippedNoSource, totals.AlreadyCurrent)
+
+			if !res.HasMore {
+				break
+			}
+			cursor = res.NextCursor
+		}
+		fmt.Printf("\n\nLexical backfill complete\n")
+		fmt.Printf("   Records scanned:     %d\n", totals.Scanned)
+		fmt.Printf("   Updated:             %d\n", totals.Updated)
+		fmt.Printf("   Skipped (no source): %d\n", totals.SkippedNoSource)
+		fmt.Printf("   Already current:     %d\n", totals.AlreadyCurrent)
+		return nil
+	},
+}
+
+var vfSearchCmd = &cobra.Command{
+	Use:   "search <collection> <field>",
+	Short: "Search a collection by vector similarity, lexical match, or hybrid",
+	Long: `Run a search against a vector field. Three modes:
+
+  semantic (default) — pure cosine over HNSW. Fuzzy / conceptual queries.
+  lexical            — pure BM25 over the field's source text.
+  hybrid             — vector + lexical fused via RRF (k=60). Strong default.
+
+--min-similarity (0..100) drops weak matches server-side. Only valid for
+semantic and hybrid; the server rejects it on lexical with a 400.`,
+	Example: `  # Hybrid search (default for production use):
+  koolbase vector-fields search articles content_embedding \
+    --query "how do I configure CI/CD?" --mode hybrid --project proj_123
+
+  # Lexical search for an exact term:
+  koolbase vector-fields search articles content_embedding \
+    --query "CVE-2024-1234" --mode lexical --project proj_123
+
+  # Semantic with a similarity floor:
+  koolbase vector-fields search articles content_embedding \
+    --query "shipping faster" --min-similarity 70 --project proj_123`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		collection := args[0]
+		field := args[1]
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		projectID, _ := cmd.Flags().GetString("project")
+		if projectID == "" {
+			if cfg.ProjectID != "" {
+				projectID = cfg.ProjectID
+			} else {
+				return fmt.Errorf("--project is required")
+			}
+		}
+
+		query, _ := cmd.Flags().GetString("query")
+		if query == "" {
+			return fmt.Errorf("--query is required")
+		}
+		mode, _ := cmd.Flags().GetString("mode")
+		limit, _ := cmd.Flags().GetInt("limit")
+		minSim, _ := cmd.Flags().GetFloat64("min-similarity")
+		minSimSet := cmd.Flags().Changed("min-similarity")
+
+		req := api.SearchSemanticRequest{
+			Collection: collection,
+			Field:      field,
+			QueryText:  query,
+			Mode:       mode,
+			Limit:      limit,
+		}
+		if minSimSet {
+			req.MinSimilarity = &minSim
+		}
+
+		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		resp, err := client.SearchSemantic(projectID, req)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("\n%d result(s) for mode=%s\n\n", resp.Total, mode)
+		if resp.Total == 0 {
+			fmt.Println("(no matches)")
+			return nil
+		}
+		for i, hit := range resp.Results {
+			id := "(no $id)"
+			if v, ok := hit.Record["$id"].(string); ok {
+				id = v
+			}
+			// Distance can be cosine (0..2) for semantic, BM25-like for
+			// lexical, RRF score for hybrid. We label the column generically.
+			fmt.Printf("%2d. %s\n", i+1, id)
+			fmt.Printf("    distance: %.6f\n", hit.Distance)
+			// Print up to two non-$ data fields so customers can eyeball
+			// hits without piping into jq. Full payload is one query
+			// away via the dashboard or db get.
+			shown := 0
+			for k, v := range hit.Record {
+				if shown >= 2 {
+					break
+				}
+				if len(k) > 0 && k[0] == '$' {
+					continue
+				}
+				preview := fmt.Sprintf("%v", v)
+				if len(preview) > 80 {
+					preview = preview[:77] + "…"
+				}
+				fmt.Printf("    %s: %s\n", k, preview)
+				shown++
+			}
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
 func init() {
 	vfListCmd.Flags().StringP("project", "p", "", "Project ID")
 
@@ -343,6 +516,17 @@ func init() {
 
 	vfDeleteCmd.Flags().StringP("project", "p", "", "Project ID")
 	vfEmbedAllCmd.Flags().StringP("project", "p", "", "Project ID")
+
+	vfLexicalBackfillCmd.Flags().StringP("project", "p", "", "Project ID")
+
+	vfSearchCmd.Flags().StringP("project", "p", "", "Project ID")
+	vfSearchCmd.Flags().String("query", "", "Query text (required)")
+	vfSearchCmd.Flags().String("mode", "semantic", "Search mode: semantic | lexical | hybrid")
+	vfSearchCmd.Flags().Int("limit", 10, "Max number of results")
+	vfSearchCmd.Flags().Float64("min-similarity", 0, "Min similarity (0..100); only valid for semantic and hybrid")
+
+	vectorFieldsCmd.AddCommand(vfLexicalBackfillCmd)
+	vectorFieldsCmd.AddCommand(vfSearchCmd)
 
 	vectorFieldsCmd.AddCommand(vfListCmd)
 	vectorFieldsCmd.AddCommand(vfCreateCmd)
