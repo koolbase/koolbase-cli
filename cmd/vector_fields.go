@@ -117,6 +117,8 @@ The provider must already be configured in this project with status=valid
 			return fmt.Errorf("--provider, --model and --source-field must all be set together (or pass none for a plain vector field)")
 		}
 
+		lexicalConfig, _ := cmd.Flags().GetString("lexical-config")
+
 		req := api.CreateVectorFieldRequest{
 			FieldName:      name,
 			Dimensions:     dimensions,
@@ -126,6 +128,9 @@ The provider must already be configured in this project with status=valid
 			req.EmbeddingProvider = &provider
 			req.EmbeddingModel = &model
 			req.SourceField = &sourceField
+		}
+		if lexicalConfig != "" {
+			req.LexicalConfig = &lexicalConfig
 		}
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
@@ -139,6 +144,7 @@ The provider must already be configured in this project with status=valid
 		fmt.Printf("   Collection:  %s\n", collection)
 		fmt.Printf("   Dimensions:  %d\n", f.Dimensions)
 		fmt.Printf("   Distance:    %s\n", f.DistanceMetric)
+		fmt.Printf("   Lexical:     %s\n", f.LexicalConfig)
 		if f.EmbeddingProvider != nil && f.SourceField != nil {
 			mn := "—"
 			if f.EmbeddingModel != nil {
@@ -187,6 +193,9 @@ You can't change a field's dimensions or distance metric — recreate it for tha
 		model, _ := cmd.Flags().GetString("model")
 		sourceField, _ := cmd.Flags().GetString("source-field")
 
+		lexicalConfig, _ := cmd.Flags().GetString("lexical-config")
+		lexicalConfigSet := cmd.Flags().Changed("lexical-config")
+
 		if clear && (provider != "" || model != "" || sourceField != "") {
 			return fmt.Errorf("--clear is mutually exclusive with --provider, --model, --source-field")
 		}
@@ -200,7 +209,11 @@ You can't change a field's dimensions or distance metric — recreate it for tha
 			req.EmbeddingModel = &model
 			req.SourceField = &sourceField
 		}
+
 		// If clear: all three pointers stay nil — server interprets as a clear.
+		if lexicalConfigSet {
+			req.LexicalConfig = &lexicalConfig
+		}
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		f, err := client.UpdateVectorFieldEmbedding(projectID, collection, name, req)
@@ -507,12 +520,14 @@ func init() {
 	vfCreateCmd.Flags().String("provider", "", "Embedding provider (gemini, openai) — requires --model and --source-field")
 	vfCreateCmd.Flags().String("model", "", "Embedding model name")
 	vfCreateCmd.Flags().String("source-field", "", "Record field to embed automatically")
+	vfCreateCmd.Flags().String("lexical-config", "", "Postgres text-search config for lexical (BM25) and hybrid search (one of: simple, english, french, german, spanish, italian, portuguese, dutch, russian, arabic). Default: simple")
 
 	vfUpdateCmd.Flags().StringP("project", "p", "", "Project ID")
 	vfUpdateCmd.Flags().String("provider", "", "Embedding provider (gemini, openai)")
 	vfUpdateCmd.Flags().String("model", "", "Embedding model name")
 	vfUpdateCmd.Flags().String("source-field", "", "Record field to embed automatically")
 	vfUpdateCmd.Flags().Bool("clear", false, "Remove auto-embed config (mutually exclusive with --provider/--model/--source-field)")
+	vfUpdateCmd.Flags().String("lexical-config", "", "Change the lexical text-search config (see vector-fields create for valid values)")
 
 	vfDeleteCmd.Flags().StringP("project", "p", "", "Project ID")
 	vfEmbedAllCmd.Flags().StringP("project", "p", "", "Project ID")

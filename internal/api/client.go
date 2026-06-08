@@ -894,6 +894,7 @@ type VectorField struct {
 	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
 	EmbeddingModel    *string `json:"embedding_model,omitempty"`
 	SourceField       *string `json:"source_field,omitempty"`
+	LexicalConfig     string  `json:"lexical_config"`
 	CreatedAt         string  `json:"created_at"`
 }
 
@@ -904,6 +905,7 @@ type CreateVectorFieldRequest struct {
 	EmbeddingProvider *string `json:"embedding_provider,omitempty"`
 	EmbeddingModel    *string `json:"embedding_model,omitempty"`
 	SourceField       *string `json:"source_field,omitempty"`
+	LexicalConfig     *string `json:"lexical_config,omitempty"`
 }
 
 // UpdateEmbeddingConfigRequest carries the auto-embed triplet for a PATCH.
@@ -913,6 +915,7 @@ type UpdateEmbeddingConfigRequest struct {
 	EmbeddingProvider *string `json:"embedding_provider"`
 	EmbeddingModel    *string `json:"embedding_model"`
 	SourceField       *string `json:"source_field"`
+	LexicalConfig     *string `json:"lexical_config,omitempty"`
 }
 
 type EmbedAllResult struct {
