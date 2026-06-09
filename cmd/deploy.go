@@ -75,7 +75,7 @@ if runtime == "dart" {
 				}
 
 				// Only send requires_auth when the flag was explicitly set, so a
-				// bare `deploy` doesn't silently flip the stored value on redeploy.
+				// bare deploy doesn't silently flip the stored value on redeploy.
 				var requiresAuth *bool
 				if cmd.Flags().Changed("requires-auth") {
 												v, _ := cmd.Flags().GetBool("requires-auth")

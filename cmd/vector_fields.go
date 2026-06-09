@@ -487,9 +487,6 @@ semantic and hybrid; the server rejects it on lexical with a 400.`,
 			// lexical, RRF score for hybrid. We label the column generically.
 			fmt.Printf("%2d. %s\n", i+1, id)
 			fmt.Printf("    distance: %.6f\n", hit.Distance)
-			// Print up to two non-$ data fields so customers can eyeball
-			// hits without piping into jq. Full payload is one query
-			// away via the dashboard or db get.
 			shown := 0
 			for k, v := range hit.Record {
 				if shown >= 2 {

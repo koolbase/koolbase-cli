@@ -152,7 +152,7 @@ var snapshotApplyCmd = &cobra.Command{
 
 		var res applyResult
 		if err := json.Unmarshal(data, &res); err != nil {
-			fmt.Println(string(data)) // fall back to raw if shape changes
+			fmt.Println(string(data))
 			return nil
 		}
 
