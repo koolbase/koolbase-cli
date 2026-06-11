@@ -10,9 +10,10 @@ import (
 const configFileName = "config.json"
 
 type Config struct {
-	APIKey     string `json:"api_key"`
-	BaseURL    string `json:"base_url"`
-	ProjectID  string `json:"project_id"`
+	APIKey         string `json:"api_key"`
+	BaseURL        string `json:"base_url"`
+	ProjectID      string `json:"project_id"`
+	FlutterSDKPath string `json:"flutter_sdk_path,omitempty"`
 }
 
 func configDir() (string, error) {
@@ -57,6 +58,10 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("KOOLBASE_PROJECT_ID"); v != "" {
 		cfg.ProjectID = v
+	}
+
+if v := os.Getenv("KOOLBASE_FLUTTER_SDK"); v != "" {
+		cfg.FlutterSDKPath = v
 	}
 
 	if cfg.APIKey == "" || cfg.BaseURL == "" {
