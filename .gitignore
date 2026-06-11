@@ -1,0 +1,10 @@
+# Compiled binary
+/koolbase
+
+# macOS
+.DS_Store
+
+# Local snapshot exports & test artifacts (developer scratch, not CLI source)
+/check.json
+/koolbase.json
+/*.kbpatch
