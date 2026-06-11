@@ -1118,3 +1118,76 @@ func (c *Client) SearchSemantic(projectID string, req SearchSemanticRequest) (*S
 	}
 	return &resp, nil
 }
+
+// ─── Engines ───────────────────────────────────────────────────────────────
+
+type EnginePublic struct {
+	Version          string  `json:"version"`
+	FlutterVersion   string  `json:"flutter_version"`
+	KoolbaseRevision int     `json:"koolbase_revision"`
+	Platform         string  `json:"platform"`
+	Arch             string  `json:"arch"`
+	SizeBytes        int64   `json:"size_bytes"`
+	SHA256           string  `json:"sha256"`
+	Status           string  `json:"status"`
+	Changelog        *string `json:"changelog,omitempty"`
+}
+
+type EngineListResponse struct {
+	Engines []EnginePublic `json:"engines"`
+	Count   int            `json:"count"`
+}
+
+type EngineDownloadResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// ListEngines returns published engines, optionally filtered by platform/arch.
+func (c *Client) ListEngines(platform, arch string) (*EngineListResponse, error) {
+	q := url.Values{}
+	if platform != "" {
+		q.Set("platform", platform)
+	}
+	if arch != "" {
+		q.Set("arch", arch)
+	}
+	path := "/v1/engines"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	data, status, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("list engines failed (%d): %s", status, string(data))
+	}
+	var out EngineListResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetEngineDownload returns a signed download URL for an engine variant.
+func (c *Client) GetEngineDownload(flutterVersion, platform, arch string) (*EngineDownloadResponse, error) {
+	path := fmt.Sprintf("/v1/engines/%s/%s/%s/download", flutterVersion, platform, arch)
+	data, status, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, fmt.Errorf("no published engine for flutter %s (%s/%s)", flutterVersion, platform, arch)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("get download failed (%d): %s", status, string(data))
+	}
+	var out EngineDownloadResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

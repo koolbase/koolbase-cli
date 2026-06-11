@@ -43,4 +43,6 @@ func init() {
 	rootCmd.AddCommand(uniqueConstraintsCmd)
 	rootCmd.AddCommand(vectorFieldsCmd)
 	rootCmd.AddCommand(pushCmd)
+	rootCmd.AddCommand(engineCmd)
+	rootCmd.AddCommand(buildCmd)
 }
