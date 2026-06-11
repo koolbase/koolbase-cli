@@ -16,7 +16,7 @@ var (
 	buildRelease    bool
 	buildVersion    string
 	buildFlutterSDK string
-	buildTreeShake  bool
+	buildNoTreeShake bool
 )
 
 var buildCmd = &cobra.Command{
@@ -106,11 +106,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if buildRelease {
 		flutterArgs = append(flutterArgs, "--release")
 	}
-	// The currently-distributed engine may not bundle const_finder.dart.snapshot,
-	// which the icon tree-shaker requires. Default to skipping tree-shaking so the
-	// build succeeds; pass --tree-shake-icons once using an engine that ships the
-	// host tools.
-	if !buildTreeShake {
+
+	// Koolbase engines ship the icon tree-shaker host tools (const_finder +
+	// font-subset), so tree-shaking works by default and produces smaller
+	// bundles. --no-tree-shake-icons opts out if a build ever needs it.
+	if buildNoTreeShake {
 		flutterArgs = append(flutterArgs, "--no-tree-shake-icons")
 	}
 
@@ -235,5 +235,5 @@ func init() {
 	buildCmd.Flags().BoolVar(&buildRelease, "release", false, "Build in release mode")
 	buildCmd.Flags().StringVar(&buildVersion, "engine", "", "Engine version to use (e.g. 3.22.3-koolbase.1)")
 	buildCmd.Flags().StringVar(&buildFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK (e.g. ~/flutter-3.22.3)")
-	buildCmd.Flags().BoolVar(&buildTreeShake, "tree-shake-icons", false, "Enable icon tree-shaking (only works with an engine that bundles const_finder)")
+	buildCmd.Flags().BoolVar(&buildNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking (keeps all icon glyphs; larger bundle)")
 }
