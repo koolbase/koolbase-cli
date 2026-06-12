@@ -484,7 +484,190 @@ func (c *Client) SetBundleMandatory(appID, bundleID string, mandatory bool) erro
 	return nil
 }
 
-// ─── Snapshot ──────────────────────────────────────────────────────────────
+// ─── Code Push (System B: Releases + Patches) ───────────────────────────────
+
+type Release struct {
+	ID             string `json:"release_id"`
+	AppID          string `json:"app_id"`
+	BuildID        string `json:"build_id"`
+	FlutterVersion string `json:"flutter_version"`
+	Platform       string `json:"platform"`
+	AppVersion     string `json:"app_version"`
+	Channel        string `json:"channel"`
+	CreatedBy      string `json:"created_by"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type Patch struct {
+	ID                string `json:"patch_id"`
+	ReleaseID         string `json:"release_id"`
+	AppID             string `json:"app_id"`
+	PatchNumber       int    `json:"patch_number"`
+	Status            string `json:"status"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	Mandatory         bool   `json:"mandatory"`
+	ReleaseNotes      string `json:"release_notes,omitempty"`
+	Checksum          string `json:"checksum"`
+	Signature         string `json:"signature"`
+	SizeBytes         int    `json:"size_bytes"`
+	StorageKey        string `json:"storage_key"`
+	CreatedBy         string `json:"created_by"`
+	CreatedAt         string `json:"created_at"`
+	PublishedAt       string `json:"published_at,omitempty"`
+	RecalledAt        string `json:"recalled_at,omitempty"`
+}
+
+type CreateReleaseRequest struct {
+	BuildID        string `json:"build_id"`
+	FlutterVersion string `json:"flutter_version"`
+	Platform       string `json:"platform"`
+	AppVersion     string `json:"app_version"`
+	Channel        string `json:"channel"`
+}
+
+type CreatePatchRequest struct {
+	ReleaseID         string `json:"release_id"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	Mandatory         bool   `json:"mandatory"`
+	ReleaseNotes      string `json:"release_notes"`
+	Checksum          string `json:"checksum"`
+	Signature         string `json:"signature"`
+	SizeBytes         int    `json:"size_bytes"`
+}
+
+func (c *Client) CreateRelease(appID string, req CreateReleaseRequest) (*Release, error) {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/releases", req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return nil, fmt.Errorf("failed to create release: %s", errResp.Error)
+	}
+	var rel Release
+	if err := json.Unmarshal(data, &rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+func (c *Client) ListReleases(appID string) ([]Release, error) {
+	data, status, err := c.do("GET", "/v1/apps/"+appID+"/releases", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list releases: %s", string(data))
+	}
+	var resp struct {
+		Releases []Release `json:"releases"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Releases, nil
+}
+
+func (c *Client) CreatePatch(appID, releaseID string, req CreatePatchRequest) (*Patch, error) {
+	req.ReleaseID = releaseID
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/releases/"+releaseID+"/patches", req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return nil, fmt.Errorf("failed to create patch: %s", errResp.Error)
+	}
+	var p Patch
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (c *Client) ListPatches(appID, releaseID string) ([]Patch, error) {
+	data, status, err := c.do("GET", "/v1/apps/"+appID+"/releases/"+releaseID+"/patches", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list patches: %s", string(data))
+	}
+	var resp struct {
+		Patches []Patch `json:"patches"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Patches, nil
+}
+
+func (c *Client) UploadPatchArtifact(appID, patchID, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("could not open patch: %w", err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return err
+	}
+	writer.Close()
+
+	url := c.baseURL + "/v1/apps/" + appID + "/patches/" + patchID + "/upload"
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload failed: %s", string(body))
+	}
+	return nil
+}
+
+func (c *Client) PublishPatch(appID, patchID string) error {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/patches/"+patchID+"/publish", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("publish failed: %s", errResp.Error)
+	}
+	return nil
+}
+
+func (c *Client) RecallPatch(appID, patchID string) error {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/patches/"+patchID+"/recall", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("recall failed: %s", errResp.Error)
+	}
+	return nil
+}
 
 // ─── Snapshot ──────────────────────────────────────────────────────────────
 
