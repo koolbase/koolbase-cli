@@ -13,47 +13,92 @@ import (
 )
 
 // appBinaryInfo is the result of analysing a built Flutter App binary for
-// VM-level (System B) patching: the build_id the engine verifies against, the
-// size of the isolate-instructions region that build_id was hashed over, and
-// the file offset of the price marker's 3 ASCII digits.
+// VM-level (System B) patching:
+//   - BuildID: the id the engine verifies against (SHA-256(instructions)[0:8])
+//   - InstrSize: bytes the engine hashes / the base instructions length
+//   - DataSize: the base isolate-data snapshot length (needed to reconstruct
+//     the whole-blob snapshot on device)
+//   - PriceOffset: file offset of the marker's 3 price digits, or -1 if the
+//     binary has no price marker (whole-blob patches don't use it)
 //
 // Faithful port of the verified writer_macho_v2 tool — same loader
-// (OpenFat → arm64 slice), same symbol (_kDartIsolateSnapshotInstructions),
-// same section-based hash range — so the build_id is byte-for-byte what the
-// patched engine recomputes at apply time. Do NOT "optimise" the hash range:
-// it must stay the section slice from the symbol to the end of the section.
+// (OpenFat → arm64 slice), same symbols, same section-based slice (from the
+// symbol to the end of its section) — so the build_id and sizes are
+// byte-for-byte what the patched engine recomputes at apply time. Do NOT
+// "optimise" the slice range.
 type appBinaryInfo struct {
 	BuildID     []byte // SHA-256(instructions)[0:8]
-	InstrSize   uint64 // bytes the engine must hash
-	PriceOffset int64  // file offset of the 3 price digits
+	InstrSize   uint64 // base instructions length (bytes the engine hashes)
+	DataSize    uint64 // base isolate-data snapshot length
+	PriceOffset int64  // file offset of the 3 price digits, or -1 if absent
 }
 
 const (
 	kbInstrSym    = "_kDartIsolateSnapshotInstructions"
+	kbDataSym     = "_kDartIsolateSnapshotData"
 	kbPriceMarker = "KBPRICE@@@100@@@END"
 )
 
+// symbolSectionSlice returns the bytes from the named symbol to the end of the
+// section that contains it — the exact range the engine recomputes for build_id
+// (instructions) and copies for reconstruction (data).
+func symbolSectionSlice(mf *macho.File, symName string) ([]byte, error) {
+	var symVA uint64
+	found := false
+	if mf.Symtab != nil {
+		for _, s := range mf.Symtab.Syms {
+			if s.Name == symName {
+				symVA = s.Value
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("symbol %s not found", symName)
+	}
+
+	var sec *macho.Section
+	for _, s := range mf.Sections {
+		if symVA >= s.Addr && symVA < s.Addr+s.Size {
+			sec = s
+			break
+		}
+	}
+	if sec == nil {
+		return nil, fmt.Errorf("no section contains 0x%x for %s", symVA, symName)
+	}
+
+	secData, derr := sec.Data()
+	if derr != nil {
+		return nil, fmt.Errorf("failed to read section data for %s: %w", symName, derr)
+	}
+	startInSec := symVA - sec.Addr
+	if startInSec > uint64(len(secData)) {
+		return nil, fmt.Errorf("symbol offset 0x%x beyond section data 0x%x for %s",
+			startInSec, len(secData), symName)
+	}
+	return secData[startInSec:], nil
+}
+
 // analyzeAppBinary inspects a built Flutter App Mach-O and returns the data
-// needed to mint a .kbpatch for it.
+// needed to mint a .kbpatch for it (marker or whole-blob).
 func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
-	data, err := os.ReadFile(appPath)
+	raw, err := os.ReadFile(appPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read binary: %w", err)
 	}
 
-	// Locate the price marker; the 3 digits sit right after "KBPRICE@@@".
+	// Locate the price marker if present; the 3 digits sit right after
+	// "KBPRICE@@@". Absence is NOT an error — whole-blob patches don't use it.
 	marker := []byte(kbPriceMarker)
-	offset := -1
-	for i := 0; i+len(marker) <= len(data); i++ {
-		if bytes.Equal(data[i:i+len(marker)], marker) {
-			offset = i
+	priceOffset := int64(-1)
+	for i := 0; i+len(marker) <= len(raw); i++ {
+		if bytes.Equal(raw[i:i+len(marker)], marker) {
+			priceOffset = int64(i + len("KBPRICE@@@"))
 			break
 		}
 	}
-	if offset == -1 {
-		return nil, fmt.Errorf("price marker %q not found in binary", kbPriceMarker)
-	}
-	priceOffset := int64(offset + len("KBPRICE@@@"))
 
 	// The App binary is a universal/fat Mach-O (even with one slice); use
 	// OpenFat and pick arm64, falling back to thin Mach-O.
@@ -80,58 +125,33 @@ func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
 	}
 	defer closeFn()
 
-	// Find the isolate-instructions symbol.
-	var symVA uint64
-	found := false
-	if mf.Symtab != nil {
-		for _, s := range mf.Symtab.Syms {
-			if s.Name == kbInstrSym {
-				symVA = s.Value
-				found = true
-				break
-			}
-		}
+	instrBytes, err := symbolSectionSlice(mf, kbInstrSym)
+	if err != nil {
+		return nil, err
 	}
-	if !found {
-		return nil, fmt.Errorf("symbol %s not found", kbInstrSym)
+	dataBytes, err := symbolSectionSlice(mf, kbDataSym)
+	if err != nil {
+		return nil, err
 	}
-
-	// Find the section containing the symbol, then hash from the symbol to
-	// the end of that section — the exact range the engine recomputes.
-	var sec *macho.Section
-	for _, s := range mf.Sections {
-		if symVA >= s.Addr && symVA < s.Addr+s.Size {
-			sec = s
-			break
-		}
-	}
-	if sec == nil {
-		return nil, fmt.Errorf("no section contains 0x%x", symVA)
-	}
-	secData, derr := sec.Data()
-	if derr != nil {
-		return nil, fmt.Errorf("failed to read section data: %w", derr)
-	}
-	startInSec := symVA - sec.Addr
-	if startInSec > uint64(len(secData)) {
-		return nil, fmt.Errorf("symbol offset 0x%x beyond section data 0x%x", startInSec, len(secData))
-	}
-	instrBytes := secData[startInSec:]
 	sum := sha256.Sum256(instrBytes)
 
 	return &appBinaryInfo{
 		BuildID:     sum[:8],
 		InstrSize:   uint64(len(instrBytes)),
+		DataSize:    uint64(len(dataBytes)),
 		PriceOffset: priceOffset,
 	}, nil
 }
 
-// buildKBPMPatch mints the signed 128-byte .kbpatch blob for a binary that
-// analyzeAppBinary already inspected. newPrice must be exactly 3 ASCII digits.
-// Header layout matches the verified engine reader exactly.
+// buildKBPMPatch mints the signed 128-byte marker (.kbpatch, kind=0) blob.
+// newPrice must be exactly 3 ASCII digits. Header layout matches the verified
+// engine reader exactly.
 func buildKBPMPatch(info *appBinaryInfo, newPrice, privateKeyPath string) ([]byte, error) {
 	if len(newPrice) != 3 {
 		return nil, fmt.Errorf("new price must be exactly 3 digits (e.g. 080), got %q", newPrice)
+	}
+	if info.PriceOffset < 0 {
+		return nil, fmt.Errorf("price marker %q not found in binary", kbPriceMarker)
 	}
 
 	keyBytes, err := os.ReadFile(privateKeyPath)
@@ -146,8 +166,9 @@ func buildKBPMPatch(info *appBinaryInfo, newPrice, privateKeyPath string) ([]byt
 	copy(buf[0:4], []byte("KBPM"))
 	binary.LittleEndian.PutUint16(buf[4:6], 1)  // version
 	binary.LittleEndian.PutUint16(buf[6:8], 64) // header_size
+	// buf[8] (kind) left 0 = marker
 	copy(buf[16:24], info.BuildID)
-	binary.LittleEndian.PutUint64(buf[24:32], uint64(info.PriceOffset)) // slot_index reused as byte location
+	binary.LittleEndian.PutUint64(buf[24:32], uint64(info.PriceOffset)) // slot reused as byte location
 	buf[40] = newPrice[0]
 	buf[41] = newPrice[1]
 	buf[42] = newPrice[2]
@@ -156,7 +177,46 @@ func buildKBPMPatch(info *appBinaryInfo, newPrice, privateKeyPath string) ([]byt
 
 	sig := ed25519.Sign(ed25519.PrivateKey(keyBytes), buf[0:64])
 	copy(buf[64:128], sig)
+	return buf, nil
+}
 
+// buildWholeBlobPatch mints the signed 128-byte whole-blob (kind=2) header.
+// Identity milestone: no diff payload — the engine reconstructs by copying the
+// base data+instructions of the running binary (sizes carried here). A real
+// diff later appends its payload after byte 128 and adds new-size fields.
+//
+// Header (signed [0..63]):
+//
+//	[0..3]   "KBPM"
+//	[8]      kind = 2
+//	[16..23] build_id
+//	[24..31] base_data_size  (LE u64)
+//	[56..63] base_instr_size (LE u64)
+//	[64..127] Ed25519 signature over [0..63]
+func buildWholeBlobPatch(info *appBinaryInfo, privateKeyPath string) ([]byte, error) {
+	keyBytes, err := os.ReadFile(privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key: %w", err)
+	}
+	if len(keyBytes) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("private key size wrong: got %d want %d", len(keyBytes), ed25519.PrivateKeySize)
+	}
+	if info.InstrSize == 0 || info.DataSize == 0 {
+		return nil, fmt.Errorf("instr_size=%d data_size=%d — analysis incomplete", info.InstrSize, info.DataSize)
+	}
+
+	buf := make([]byte, 128)
+	copy(buf[0:4], []byte("KBPM"))
+	binary.LittleEndian.PutUint16(buf[4:6], 1)  // version
+	binary.LittleEndian.PutUint16(buf[6:8], 64) // header_size
+	buf[8] = 2                                  // kind = whole-blob
+	copy(buf[16:24], info.BuildID)
+	binary.LittleEndian.PutUint64(buf[24:32], info.DataSize)
+	binary.LittleEndian.PutUint32(buf[48:52], 1) // key_id
+	binary.LittleEndian.PutUint64(buf[56:64], info.InstrSize)
+
+	sig := ed25519.Sign(ed25519.PrivateKey(keyBytes), buf[0:64])
+	copy(buf[64:128], sig)
 	return buf, nil
 }
 

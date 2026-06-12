@@ -18,6 +18,16 @@ var patchCmd = &cobra.Command{
 	Short: "Build, sign and ship VM-level code-push patches",
 }
 
+// koolbaseVmDir is the on-device handshake directory shared with the patched
+// engine and the Dart SDK: $HOME/Library/Application Support/koolbase/vm.
+func koolbaseVmDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not resolve home dir: %w", err)
+	}
+	return filepath.Join(home, "Library", "Application Support", "koolbase", "vm"), nil
+}
+
 var patchPushCmd = &cobra.Command{
 	Use:   "push",
 	Short: "Build → sign → upload (→ publish) a patch for a built App binary",
@@ -145,6 +155,57 @@ var patchPushCmd = &cobra.Command{
 	},
 }
 
+// patchStageLocalCmd builds a whole-blob (kind=2) patch for a built App binary
+// and writes it straight to the local vm handshake dir as staged.kbpatch. No
+// server, no SDK — this drives the engine identity-load test directly, the same
+// way the marker demo was staged. The build_id is computed from THIS binary, so
+// it must be the exact App the patched engine will run.
+var patchStageLocalCmd = &cobra.Command{
+	Use:   "stage-local",
+	Short: "Build a whole-blob patch for a built App and stage it locally (dev/engine test)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		binary, _ := cmd.Flags().GetString("binary")
+		keyPath, _ := cmd.Flags().GetString("key")
+		if binary == "" {
+			return fmt.Errorf("--binary is required (path to the built App binary)")
+		}
+
+		fmt.Println("  Analyzing binary...")
+		info, err := analyzeAppBinary(binary)
+		if err != nil {
+			return fmt.Errorf("analysis failed: %w", err)
+		}
+		buildID := hex.EncodeToString(info.BuildID)
+		fmt.Printf("  ✓ build_id %s (instr_size %d, data_size %d)\n",
+			buildID, info.InstrSize, info.DataSize)
+
+		blob, err := buildWholeBlobPatch(info, keyPath)
+		if err != nil {
+			return fmt.Errorf("patch build failed: %w", err)
+		}
+
+		vmDir, err := koolbaseVmDir()
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(vmDir, 0o755); err != nil {
+			return fmt.Errorf("could not create vm dir: %w", err)
+		}
+		// Clear any prior applied marker so this is a clean run.
+		_ = os.Remove(filepath.Join(vmDir, "applied.kbpatch"))
+
+		stagedPath := filepath.Join(vmDir, "staged.kbpatch")
+		if err := os.WriteFile(stagedPath, blob, 0o644); err != nil {
+			return fmt.Errorf("could not stage patch: %w", err)
+		}
+
+		fmt.Printf("  ✓ staged whole-blob patch (%d bytes, kind=2) → %s\n", len(blob), stagedPath)
+		fmt.Printf("  build_id: %s\n", buildID)
+		fmt.Println("  Launch the app; the patched engine reconstructs the snapshot on this run.")
+		return nil
+	},
+}
+
 var patchListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List patches for a release",
@@ -248,6 +309,9 @@ func init() {
 	patchPushCmd.Flags().String("notes", "", "Release notes")
 	patchPushCmd.Flags().Bool("publish", false, "Publish immediately after upload")
 
+	patchStageLocalCmd.Flags().String("binary", "", "Path to the built App binary (required)")
+	patchStageLocalCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
+
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")
 	patchListCmd.Flags().String("release", "", "Release ID (required)")
 
@@ -258,6 +322,7 @@ func init() {
 	patchRecallCmd.Flags().String("patch", "", "Patch ID (required)")
 
 	patchCmd.AddCommand(patchPushCmd)
+	patchCmd.AddCommand(patchStageLocalCmd)
 	patchCmd.AddCommand(patchListCmd)
 	patchCmd.AddCommand(patchPublishCmd)
 	patchCmd.AddCommand(patchRecallCmd)
