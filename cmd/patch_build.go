@@ -1,4 +1,3 @@
-// cmd/patch_build.go
 package cmd
 
 import (
@@ -9,6 +8,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // appBinaryInfo is the result of analysing a built Flutter App binary for
@@ -157,4 +158,37 @@ func buildKBPMPatch(info *appBinaryInfo, newPrice, privateKeyPath string) ([]byt
 	copy(buf[64:128], sig)
 
 	return buf, nil
+}
+
+// stampBuildId writes the build_id hex into the app bundle so the SDK can
+// report it at runtime, at <X.app>/Contents/Resources/koolbase_build_id
+// (derived from the App binary path). Writing here does NOT touch the
+// instructions section, so the build_id stays valid. Run before code-signing.
+// macOS-only for now; iOS/Android land later.
+func stampBuildId(binaryPath, buildID string) (string, error) {
+	appRoot, err := appBundleRoot(binaryPath)
+	if err != nil {
+		return "", err
+	}
+	resDir := filepath.Join(appRoot, "Contents", "Resources")
+	if _, err := os.Stat(resDir); err != nil {
+		return "", fmt.Errorf("Resources dir not found at %s: %w", resDir, err)
+	}
+	out := filepath.Join(resDir, "koolbase_build_id")
+	if err := os.WriteFile(out, []byte(buildID), 0o644); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// appBundleRoot walks up from the App binary to the enclosing *.app directory.
+func appBundleRoot(binaryPath string) (string, error) {
+	p := filepath.Clean(binaryPath)
+	for p != "/" && p != "." {
+		if strings.HasSuffix(p, ".app") {
+			return p, nil
+		}
+		p = filepath.Dir(p)
+	}
+	return "", fmt.Errorf("no enclosing .app bundle found for %s", binaryPath)
 }

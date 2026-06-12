@@ -44,6 +44,12 @@ var releaseCreateCmd = &cobra.Command{
 		buildID := hex.EncodeToString(info.BuildID)
 		fmt.Printf("  ✓ build_id %s (instr_size %d)\n", buildID, info.InstrSize)
 
+		if stamped, serr := stampBuildId(binary, buildID); serr != nil {
+			fmt.Printf("  ! build_id not stamped into bundle: %v\n", serr)
+		} else {
+			fmt.Printf("  ✓ stamped build_id → %s\n", stamped)
+		}
+
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		rel, err := client.CreateRelease(appID, api.CreateReleaseRequest{
 			BuildID:        buildID,
