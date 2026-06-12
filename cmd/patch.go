@@ -76,7 +76,6 @@ var patchPushCmd = &cobra.Command{
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
-		// Resolve release: explicit flag, else match by build_id, else create.
 		if releaseID == "" {
 			releases, err := client.ListReleases(appID)
 			if err != nil {
@@ -155,33 +154,57 @@ var patchPushCmd = &cobra.Command{
 	},
 }
 
-// patchStageLocalCmd builds a whole-blob (kind=2) patch for a built App binary
-// and writes it straight to the local vm handshake dir as staged.kbpatch. No
-// server, no SDK — this drives the engine identity-load test directly, the same
-// way the marker demo was staged. The build_id is computed from THIS binary, so
-// it must be the exact App the patched engine will run.
+// patchStageLocalCmd builds a whole-blob patch and writes it straight to the
+// local vm handshake dir as staged.kbpatch — no server, no SDK. Drives the
+// engine test directly.
+//
+//	--binary A            -> kind=2 IDENTITY (engine copies the running base)
+//	--binary A --new B     -> kind=3 REPLACEMENT (build_id from A, snapshot from B)
+//
+// build_id is always computed from --binary (the running/base binary), so it
+// must be the exact App the patched engine will run.
 var patchStageLocalCmd = &cobra.Command{
 	Use:   "stage-local",
-	Short: "Build a whole-blob patch for a built App and stage it locally (dev/engine test)",
+	Short: "Build a whole-blob patch and stage it locally (dev/engine test)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		binary, _ := cmd.Flags().GetString("binary")
+		newBin, _ := cmd.Flags().GetString("new")
 		keyPath, _ := cmd.Flags().GetString("key")
 		if binary == "" {
-			return fmt.Errorf("--binary is required (path to the built App binary)")
+			return fmt.Errorf("--binary is required (the running/base App binary)")
 		}
 
-		fmt.Println("  Analyzing binary...")
-		info, err := analyzeAppBinary(binary)
+		fmt.Println("  Analyzing base binary...")
+		base, err := analyzeAppBinary(binary)
 		if err != nil {
-			return fmt.Errorf("analysis failed: %w", err)
+			return fmt.Errorf("base analysis failed: %w", err)
 		}
-		buildID := hex.EncodeToString(info.BuildID)
-		fmt.Printf("  ✓ build_id %s (instr_size %d, data_size %d)\n",
-			buildID, info.InstrSize, info.DataSize)
+		buildID := hex.EncodeToString(base.BuildID)
+		fmt.Printf("  ✓ base build_id %s (instr_size %d, data_size %d)\n",
+			buildID, base.InstrSize, base.DataSize)
 
-		blob, err := buildWholeBlobPatch(info, keyPath)
-		if err != nil {
-			return fmt.Errorf("patch build failed: %w", err)
+		var blob []byte
+		var kindDesc string
+		if newBin == "" {
+			// kind=2 identity
+			blob, err = buildWholeBlobPatch(base, keyPath)
+			if err != nil {
+				return fmt.Errorf("patch build failed: %w", err)
+			}
+			kindDesc = "kind=2 identity"
+		} else {
+			// kind=3 full replacement: payload = new binary's snapshot
+			fmt.Println("  Extracting new snapshot...")
+			newData, newInstr, eerr := extractSnapshotBlobs(newBin)
+			if eerr != nil {
+				return fmt.Errorf("new-blob extraction failed: %w", eerr)
+			}
+			fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
+			blob, err = buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
+			if err != nil {
+				return fmt.Errorf("patch build failed: %w", err)
+			}
+			kindDesc = "kind=3 replacement"
 		}
 
 		vmDir, err := koolbaseVmDir()
@@ -191,7 +214,6 @@ var patchStageLocalCmd = &cobra.Command{
 		if err := os.MkdirAll(vmDir, 0o755); err != nil {
 			return fmt.Errorf("could not create vm dir: %w", err)
 		}
-		// Clear any prior applied marker so this is a clean run.
 		_ = os.Remove(filepath.Join(vmDir, "applied.kbpatch"))
 
 		stagedPath := filepath.Join(vmDir, "staged.kbpatch")
@@ -199,9 +221,9 @@ var patchStageLocalCmd = &cobra.Command{
 			return fmt.Errorf("could not stage patch: %w", err)
 		}
 
-		fmt.Printf("  ✓ staged whole-blob patch (%d bytes, kind=2) → %s\n", len(blob), stagedPath)
-		fmt.Printf("  build_id: %s\n", buildID)
-		fmt.Println("  Launch the app; the patched engine reconstructs the snapshot on this run.")
+		fmt.Printf("  ✓ staged %s (%d bytes) → %s\n", kindDesc, len(blob), stagedPath)
+		fmt.Printf("  base build_id: %s\n", buildID)
+		fmt.Println("  Launch the base app; the patched engine reconstructs the snapshot on this run.")
 		return nil
 	},
 }
@@ -309,7 +331,8 @@ func init() {
 	patchPushCmd.Flags().String("notes", "", "Release notes")
 	patchPushCmd.Flags().Bool("publish", false, "Publish immediately after upload")
 
-	patchStageLocalCmd.Flags().String("binary", "", "Path to the built App binary (required)")
+	patchStageLocalCmd.Flags().String("binary", "", "Path to the running/base App binary (required)")
+	patchStageLocalCmd.Flags().String("new", "", "Path to a recompiled App binary; present => kind=3 replacement")
 	patchStageLocalCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
 
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")
