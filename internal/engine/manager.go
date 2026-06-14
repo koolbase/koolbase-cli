@@ -6,6 +6,7 @@ package engine
 
 import (
 	"archive/zip"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -16,6 +17,34 @@ import (
 	"strings"
 	"time"
 )
+
+// engineSigningPubKeyHex is Koolbase's Ed25519 public key for engine artifacts.
+// The matching private key signs each engine's SHA-256 digest at publish time;
+// the CLI verifies that signature here so a tampered or unofficial engine (even
+// one with a matching hash served by a hostile mirror) is rejected. SHA-256
+// alone proves integrity, not authenticity — this proves the engine is Koolbase's.
+const engineSigningPubKeyHex = "4703d582db36d6c2adc7cc9d0b0680aea9bcac51aaddc3fbbe3df7d51780660d"
+
+// verifyEngineSignature checks that sigHex is a valid Ed25519 signature, by
+// Koolbase's engine key, over the raw 32-byte sha256 digest (digestHex).
+func verifyEngineSignature(digestHex, sigHex string) error {
+	pub, err := hex.DecodeString(engineSigningPubKeyHex)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("internal: bad baked engine public key")
+	}
+	digest, err := hex.DecodeString(digestHex)
+	if err != nil || len(digest) != 32 {
+		return fmt.Errorf("bad digest for signature check")
+	}
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("bad engine signature encoding")
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), digest, sig) {
+		return fmt.Errorf("engine signature verification FAILED — refusing to install (artifact is not authentically signed by Koolbase)")
+	}
+	return nil
+}
 
 // InstallDir returns ~/.koolbase/engines, creating nothing. Callers that
 // write must MkdirAll first.
@@ -94,7 +123,7 @@ type ProgressFunc func(downloaded, total int64)
 // Install downloads the engine zip from signedURL, verifies its SHA-256
 // against wantSHA, and extracts it into ~/.koolbase/engines/{version}/.
 // If the version is already installed it returns nil without re-downloading.
-func Install(version, signedURL, wantSHA string, totalBytes int64, progress ProgressFunc) error {
+func Install(version, signedURL, wantSHA, wantSig string, totalBytes int64, progress ProgressFunc) error {
 	installed, err := IsInstalled(version)
 	if err != nil {
 		return err
@@ -146,6 +175,15 @@ func Install(version, signedURL, wantSHA string, totalBytes int64, progress Prog
 	gotSHA := hex.EncodeToString(hasher.Sum(nil))
 	if !strings.EqualFold(gotSHA, wantSHA) {
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", wantSHA, gotSHA)
+	}
+
+	// Authenticity: verify Koolbase's Ed25519 signature over the digest. An empty
+	// signature is rejected — every published engine must be signed.
+	if wantSig == "" {
+		return fmt.Errorf("engine has no signature — refusing to install unsigned artifact")
+	}
+	if err := verifyEngineSignature(gotSHA, wantSig); err != nil {
+		return err
 	}
 
 	// Extract into a temp dir, then rename into place atomically.

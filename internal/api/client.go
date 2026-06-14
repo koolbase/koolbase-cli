@@ -522,6 +522,7 @@ type CreateReleaseRequest struct {
 	FlutterVersion string `json:"flutter_version"`
 	Platform       string `json:"platform"`
 	AppVersion     string `json:"app_version"`
+	MatchMode      string `json:"match_mode"`
 	Channel        string `json:"channel"`
 }
 
@@ -1308,8 +1309,10 @@ type EnginePublic struct {
 	Version          string  `json:"version"`
 	FlutterVersion   string  `json:"flutter_version"`
 	KoolbaseRevision int     `json:"koolbase_revision"`
-	Platform         string  `json:"platform"`
-	Arch             string  `json:"arch"`
+	HostPlatform     string  `json:"host_platform"`
+	HostArch         string  `json:"host_arch"`
+	TargetPlatform   string  `json:"target_platform"`
+	TargetArch       string  `json:"target_arch"`
 	SizeBytes        int64   `json:"size_bytes"`
 	SHA256           string  `json:"sha256"`
 	Status           string  `json:"status"`
@@ -1326,16 +1329,23 @@ type EngineDownloadResponse struct {
 	ExpiresAt string `json:"expires_at"`
 	SHA256    string `json:"sha256"`
 	SizeBytes int64  `json:"size_bytes"`
+	Signature string `json:"signature,omitempty"`
 }
 
 // ListEngines returns published engines, optionally filtered by platform/arch.
-func (c *Client) ListEngines(platform, arch string) (*EngineListResponse, error) {
+func (c *Client) ListEngines(hostPlatform, hostArch, targetPlatform, targetArch string) (*EngineListResponse, error) {
 	q := url.Values{}
-	if platform != "" {
-		q.Set("platform", platform)
+	if hostPlatform != "" {
+		q.Set("host_platform", hostPlatform)
 	}
-	if arch != "" {
-		q.Set("arch", arch)
+	if hostArch != "" {
+		q.Set("host_arch", hostArch)
+	}
+	if targetPlatform != "" {
+		q.Set("target_platform", targetPlatform)
+	}
+	if targetArch != "" {
+		q.Set("target_arch", targetArch)
 	}
 	path := "/v1/engines"
 	if encoded := q.Encode(); encoded != "" {
@@ -1356,14 +1366,19 @@ func (c *Client) ListEngines(platform, arch string) (*EngineListResponse, error)
 }
 
 // GetEngineDownload returns a signed download URL for an engine variant.
-func (c *Client) GetEngineDownload(flutterVersion, platform, arch string) (*EngineDownloadResponse, error) {
-	path := fmt.Sprintf("/v1/engines/%s/%s/%s/download", flutterVersion, platform, arch)
+func (c *Client) GetEngineDownload(flutterVersion, hostPlatform, hostArch, targetPlatform, targetArch string) (*EngineDownloadResponse, error) {
+	q := url.Values{}
+	q.Set("host_platform", hostPlatform)
+	q.Set("host_arch", hostArch)
+	q.Set("target_platform", targetPlatform)
+	q.Set("target_arch", targetArch)
+	path := fmt.Sprintf("/v1/engines/%s/download?%s", flutterVersion, q.Encode())
 	data, status, err := c.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("no published engine for flutter %s (%s/%s)", flutterVersion, platform, arch)
+		return nil, fmt.Errorf("no published engine for flutter %s (host %s/%s -> target %s/%s)", flutterVersion, hostPlatform, hostArch, targetPlatform, targetArch)
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("get download failed (%d): %s", status, string(data))

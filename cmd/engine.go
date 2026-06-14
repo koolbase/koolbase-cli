@@ -28,8 +28,8 @@ func hostArch() string {
 	}
 }
 
-// hostPlatform maps Go's runtime OS to Koolbase platform names.
-// Only macos is supported today; android/ios come later.
+// hostPlatform maps Go's runtime OS to Koolbase HOST platform names (the OS the
+// build runs on). Only macos is supported today; linux/windows come later.
 func hostPlatform() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -38,6 +38,11 @@ func hostPlatform() string {
 		return runtime.GOOS
 	}
 }
+
+// targetPlatform/targetArch are what the built app runs on. The launch targets
+// Android/arm64; these are the defaults until a --target flag is added.
+func targetPlatform() string { return "android" }
+func targetArch() string     { return "arm64" }
 
 var engineListCmd = &cobra.Command{
 	Use:   "list",
@@ -49,20 +54,20 @@ var engineListCmd = &cobra.Command{
 		}
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
-		platform := hostPlatform()
-		arch := hostArch()
-		resp, err := client.ListEngines(platform, arch)
+		hostP, hostA := hostPlatform(), hostArch()
+		targetP, targetA := targetPlatform(), targetArch()
+		resp, err := client.ListEngines(hostP, hostA, targetP, targetA)
 		if err != nil {
 			return err
 		}
 
 		if resp.Count == 0 {
-			fmt.Printf("No engines available for %s/%s.\n", platform, arch)
+			fmt.Printf("No engines available for host %s/%s, target %s/%s.\n", hostP, hostA, targetP, targetA)
 			return nil
 		}
 
 		// Mark which ones are installed locally.
-		fmt.Printf("Available engines for %s/%s:\n\n", platform, arch)
+		fmt.Printf("Available engines for host %s/%s, target %s/%s:\n\n", hostP, hostA, targetP, targetA)
 		for _, e := range resp.Engines {
 			installed, _ := engine.IsInstalled(e.Version)
 			marker := " "
@@ -101,11 +106,11 @@ e.g.:
 		}
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
-		platform := hostPlatform()
-		arch := hostArch()
+		hostP, hostA := hostPlatform(), hostArch()
+		targetP, targetA := targetPlatform(), targetArch()
 
-		fmt.Printf("Resolving engine for flutter %s (%s/%s)...\n", flutterVersion, platform, arch)
-		dl, err := client.GetEngineDownload(flutterVersion, platform, arch)
+		fmt.Printf("Resolving engine for flutter %s (host %s/%s -> target %s/%s)...\n", flutterVersion, hostP, hostA, targetP, targetA)
+		dl, err := client.GetEngineDownload(flutterVersion, hostP, hostA, targetP, targetA)
 		if err != nil {
 			return err
 		}
@@ -113,7 +118,7 @@ e.g.:
 		// The version string the API publishes (e.g. 3.22.3-koolbase.1) is what
 		// we install under. Re-list to get it; the download response doesn't
 		// carry it, so derive from the list.
-		list, err := client.ListEngines(platform, arch)
+		list, err := client.ListEngines(hostP, hostA, targetP, targetA)
 		if err != nil {
 			return err
 		}
@@ -147,7 +152,7 @@ e.g.:
 			}
 		}
 
-		if err := engine.Install(version, dl.URL, dl.SHA256, dl.SizeBytes, progress); err != nil {
+		if err := engine.Install(version, dl.URL, dl.SHA256, dl.Signature, dl.SizeBytes, progress); err != nil {
 			fmt.Println()
 			return err
 		}
