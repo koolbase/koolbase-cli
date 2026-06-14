@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"path/filepath"
 	"strings"
 
@@ -44,8 +45,8 @@ Examples:
 
 func runBuild(cmd *cobra.Command, args []string) error {
 	platform := args[0]
-	if platform != "macos" {
-		return fmt.Errorf("platform %q not supported yet — only 'macos' is available today", platform)
+	if platform != "macos" && platform != "android" {
+		return fmt.Errorf("platform %q not supported — use 'macos' or 'android'", platform)
 	}
 
 	// Resolve which engine to use.
@@ -84,7 +85,17 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	localEngine := "mac_release_" + hostArch()
+	var localEngine, localEngineHost, flutterSubcmd string
+	switch platform {
+	case "android":
+		localEngine = "android_release_arm64"
+		localEngineHost = "host_release_arm64"
+		flutterSubcmd = "apk"
+	default: // macos
+		localEngine = "mac_release_" + hostArch()
+		localEngineHost = localEngine
+		flutterSubcmd = "macos"
+	}
 
 	// Resolve the flutter binary. The SDK version MUST match the engine's
 	// Flutter version or Dart compilation fails (framework source compiled
@@ -96,11 +107,16 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Preflight: fail fast and legibly if the SDK version doesn't match the engine.
+	wantFlutter := strings.TrimSuffix(version, "-koolbase.1")
+	if verr := verifyFlutterVersion(flutterBin, wantFlutter); verr != nil {
+		return verr
+	}
 
 	flutterArgs := []string{
-		"build", "macos",
+		"build", flutterSubcmd,
 		"--local-engine=" + localEngine,
-		"--local-engine-host=" + localEngine,
+		"--local-engine-host=" + localEngineHost,
 		"--local-engine-src-path=" + srcPath,
 	}
 	if buildRelease {
@@ -114,7 +130,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		flutterArgs = append(flutterArgs, "--no-tree-shake-icons")
 	}
 
-	fmt.Printf("Building macos with Koolbase engine %s\n", version)
+	fmt.Printf("Building %s with Koolbase engine %s\n", platform, version)
 	fmt.Printf("  Flutter SDK: %s (%s)\n", flutterBin, sdkSource)
 	fmt.Printf("  flutter %s\n\n", strings.Join(flutterArgs, " "))
 
@@ -126,7 +142,29 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("flutter build failed: %w", err)
 	}
 
-	fmt.Println("\n✓ Build complete. This binary supports Koolbase Code Push.")
+	if platform == "android" {
+		projectDir, _ := os.Getwd()
+		apkPath := filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", "app-release.apk")
+		fmt.Println("\n  Stamping build_id...")
+		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, apkPath)
+		if serr != nil {
+			return fmt.Errorf("stamp build_id: %w", serr)
+		}
+		fmt.Printf("  \u2713 build_id %s\n", buildID)
+		if changed {
+			fmt.Println("  Bundling build_id asset (one rebuild)...")
+			rebuild := exec.Command(flutterBin, flutterArgs...)
+			rebuild.Stdout = os.Stdout
+			rebuild.Stderr = os.Stderr
+			rebuild.Stdin = os.Stdin
+			if rerr := rebuild.Run(); rerr != nil {
+				return fmt.Errorf("rebuild after stamp failed: %w", rerr)
+			}
+			// build_id is stable across asset-only changes (verified), so no re-stamp.
+		}
+	}
+
+	fmt.Println("\n\u2713 Build complete. This binary supports Koolbase Code Push.")
 	return nil
 }
 
@@ -172,6 +210,42 @@ func resolveFlutterBin(engineVersion string) (bin string, source string, err err
 		"  matching SDK: koolbase build macos --flutter-sdk /path/to/flutter-%s\n\n",
 		flutterVersion, flutterVersion)
 	return b, "from PATH (unverified version)", nil
+}
+
+// flutterVersionRe extracts the version from `flutter --version` output, whose
+// first line looks like: "Flutter 3.44.0 • channel ... • ...".
+var flutterVersionRe = regexp.MustCompile(`Flutter\s+(\d+\.\d+\.\d+)`)
+
+// verifyFlutterVersion runs `flutterBin --version` and confirms it matches the
+// engine's required Flutter version (e.g. "3.44.0"). Returns a clear, actionable
+// error on mismatch so a wrong SDK fails FAST and legibly instead of deep inside
+// the Dart front-end with a cryptic language-version error minutes later.
+func verifyFlutterVersion(flutterBin, wantVersion string) error {
+	out, err := exec.Command(flutterBin, "--version").CombinedOutput()
+	if err != nil {
+		// Don't hard-fail on a flaky --version invocation; warn and proceed.
+		fmt.Printf("⚠ Could not run 'flutter --version' to verify SDK version: %v\n"+
+			"  Proceeding, but the SDK MUST be Flutter %s.\n\n", err, wantVersion)
+		return nil
+	}
+	m := flutterVersionRe.FindSubmatch(out)
+	if m == nil {
+		fmt.Printf("⚠ Could not parse Flutter version from 'flutter --version'.\n"+
+			"  Proceeding, but the SDK MUST be Flutter %s.\n\n", wantVersion)
+		return nil
+	}
+	got := string(m[1])
+	if got != wantVersion {
+		return fmt.Errorf(
+			"Flutter SDK version mismatch.\n"+
+				"  This Koolbase engine requires Flutter %s, but the resolved SDK is Flutter %s.\n"+
+				"  Building with a mismatched SDK fails with confusing Dart language-version errors.\n"+
+				"  Fix: install Flutter %s and point Koolbase at it:\n"+
+				"    koolbase build android --release --flutter-sdk /path/to/flutter-%s\n"+
+				"  (or set it once via your saved config).",
+			wantVersion, got, wantVersion, wantVersion)
+	}
+	return nil
 }
 
 // flutterBinFromSDK turns a Flutter SDK root into the path of its flutter
