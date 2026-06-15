@@ -28,9 +28,16 @@ func koolbaseVmDir() (string, error) {
 	return filepath.Join(home, "Library", "Application Support", "koolbase", "vm"), nil
 }
 
+// patchPushCmd builds a kind=3 whole-blob replacement patch and ships it:
+// build → sign → create/match release → create draft → upload → (publish).
+//
+//	--binary  the CURRENTLY RELEASED App binary (base devices run; build_id source)
+//	--new     the recompiled App binary with the changes to ship (payload)
+//
+// Works on macOS (App) and Android (libapp.so) — format is auto-detected.
 var patchPushCmd = &cobra.Command{
 	Use:   "push",
-	Short: "Build → sign → upload (→ publish) a patch for a built App binary",
+	Short: "Build → sign → upload (→ publish) a whole-blob patch for a built App binary",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -38,12 +45,13 @@ var patchPushCmd = &cobra.Command{
 		}
 		appID, _ := cmd.Flags().GetString("app")
 		binary, _ := cmd.Flags().GetString("binary")
-		newPrice, _ := cmd.Flags().GetString("new-price")
+		newBin, _ := cmd.Flags().GetString("new")
 		keyPath, _ := cmd.Flags().GetString("key")
 		channel, _ := cmd.Flags().GetString("channel")
 		platform, _ := cmd.Flags().GetString("platform")
 		flutterVersion, _ := cmd.Flags().GetString("flutter-version")
 		appVersion, _ := cmd.Flags().GetString("app-version")
+		matchMode, _ := cmd.Flags().GetString("match-mode")
 		releaseID, _ := cmd.Flags().GetString("release")
 		rollout, _ := cmd.Flags().GetInt("rollout")
 		mandatory, _ := cmd.Flags().GetBool("mandatory")
@@ -54,25 +62,42 @@ var patchPushCmd = &cobra.Command{
 			return fmt.Errorf("--app is required")
 		}
 		if binary == "" {
-			return fmt.Errorf("--binary is required (path to the built App binary)")
+			return fmt.Errorf("--binary is required (the released/base App binary)")
 		}
-		if len(newPrice) != 3 {
-			return fmt.Errorf("--new-price must be exactly 3 digits (e.g. 080)")
+		if newBin == "" {
+			return fmt.Errorf("--new is required (the recompiled App binary to ship)")
 		}
 
-		fmt.Println("  Analyzing binary...")
-		info, err := analyzeAppBinary(binary)
+		fmt.Println("  Analyzing base binary...")
+		base, err := analyzeAppBinary(binary)
 		if err != nil {
-			return fmt.Errorf("analysis failed: %w", err)
+			return fmt.Errorf("base analysis failed: %w", err)
 		}
-		buildID := hex.EncodeToString(info.BuildID)
-		fmt.Printf("  ✓ build_id %s (instr_size %d)\n", buildID, info.InstrSize)
+		buildID := hex.EncodeToString(base.BuildID)
+		fmt.Printf("  ✓ base build_id %s (instr_size %d, data_size %d)\n",
+			buildID, base.InstrSize, base.DataSize)
 
-		if stamped, serr := stampBuildId(binary, buildID); serr != nil {
-			fmt.Printf("  ! build_id not stamped into bundle: %v\n", serr)
-		} else {
-			fmt.Printf("  ✓ stamped build_id → %s\n", stamped)
+		fmt.Println("  Extracting new snapshot...")
+		newData, newInstr, eerr := extractSnapshotBlobs(newBin)
+		if eerr != nil {
+			return fmt.Errorf("new-blob extraction failed: %w", eerr)
 		}
+		fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
+
+		fmt.Println("  Building patch...")
+		blob, err := buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
+		if err != nil {
+			return fmt.Errorf("patch build failed: %w", err)
+		}
+		checksum := fmt.Sprintf("sha256:%x", sha256.Sum256(blob))
+		signature := fmt.Sprintf("%x", blob[64:128])
+
+		tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("kb_%d.kbpatch", time.Now().UnixNano()))
+		if err := os.WriteFile(tmpPath, blob, 0644); err != nil {
+			return fmt.Errorf("could not write temp patch: %w", err)
+		}
+		defer os.Remove(tmpPath)
+		fmt.Printf("  ✓ patch built (%d bytes, kind=3 replacement)\n", len(blob))
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
@@ -93,6 +118,7 @@ var patchPushCmd = &cobra.Command{
 					FlutterVersion: flutterVersion,
 					Platform:       platform,
 					AppVersion:     appVersion,
+					MatchMode:      matchMode,
 					Channel:        channel,
 				})
 				if err != nil {
@@ -104,21 +130,6 @@ var patchPushCmd = &cobra.Command{
 				fmt.Printf("  ✓ release matched → %s\n", releaseID)
 			}
 		}
-
-		fmt.Println("  Building patch...")
-		blob, err := buildKBPMPatch(info, newPrice, keyPath)
-		if err != nil {
-			return fmt.Errorf("patch build failed: %w", err)
-		}
-		checksum := fmt.Sprintf("sha256:%x", sha256.Sum256(blob))
-		signature := fmt.Sprintf("%x", blob[64:128])
-
-		tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("kb_%d.kbpatch", time.Now().UnixNano()))
-		if err := os.WriteFile(tmpPath, blob, 0644); err != nil {
-			return fmt.Errorf("could not write temp patch: %w", err)
-		}
-		defer os.Remove(tmpPath)
-		fmt.Printf("  ✓ patch built (%d bytes)\n", len(blob))
 
 		patch, err := client.CreatePatch(appID, releaseID, api.CreatePatchRequest{
 			RolloutPercentage: rollout,
@@ -170,6 +181,7 @@ var patchStageLocalCmd = &cobra.Command{
 		binary, _ := cmd.Flags().GetString("binary")
 		newBin, _ := cmd.Flags().GetString("new")
 		keyPath, _ := cmd.Flags().GetString("key")
+		asDiff, _ := cmd.Flags().GetBool("diff")
 		if binary == "" {
 			return fmt.Errorf("--binary is required (the running/base App binary)")
 		}
@@ -193,18 +205,36 @@ var patchStageLocalCmd = &cobra.Command{
 			}
 			kindDesc = "kind=2 identity"
 		} else {
-			// kind=3 full replacement: payload = new binary's snapshot
 			fmt.Println("  Extracting new snapshot...")
 			newData, newInstr, eerr := extractSnapshotBlobs(newBin)
 			if eerr != nil {
 				return fmt.Errorf("new-blob extraction failed: %w", eerr)
 			}
 			fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
-			blob, err = buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
-			if err != nil {
-				return fmt.Errorf("patch build failed: %w", err)
+			if asDiff {
+				// kind=4 diff: payload = KBD1 delta(baseBlob -> newBlob).
+				fmt.Println("  Extracting base snapshot for diff...")
+				baseData, baseInstr, berr := extractSnapshotBlobs(binary)
+				if berr != nil {
+					return fmt.Errorf("base-blob extraction failed: %w", berr)
+				}
+				fmt.Printf("  ✓ base snapshot (data %d, instr %d)\n", len(baseData), len(baseInstr))
+				blob, err = buildDiffPatch(base, baseData, baseInstr, newData, newInstr, keyPath)
+				if err != nil {
+					return fmt.Errorf("diff patch build failed: %w", err)
+				}
+				full := len(newData) + len(newInstr)
+				fmt.Printf("  ✓ diff payload: %d bytes vs %d full (%.1fx smaller)\n",
+					len(blob)-128, full, float64(full)/float64(len(blob)-128))
+				kindDesc = "kind=4 diff"
+			} else {
+				// kind=3 full replacement: payload = new binary's snapshot
+				blob, err = buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
+				if err != nil {
+					return fmt.Errorf("patch build failed: %w", err)
+				}
+				kindDesc = "kind=3 replacement"
 			}
-			kindDesc = "kind=3 replacement"
 		}
 
 		vmDir, err := koolbaseVmDir()
@@ -318,13 +348,14 @@ var patchRecallCmd = &cobra.Command{
 
 func init() {
 	patchPushCmd.Flags().String("app", "", "App (project) ID (required)")
-	patchPushCmd.Flags().String("binary", "", "Path to the built App binary (required)")
-	patchPushCmd.Flags().String("new-price", "", "New 3-digit price to patch in, e.g. 080 (required)")
+	patchPushCmd.Flags().String("binary", "", "Path to the released/base App binary (required)")
+	patchPushCmd.Flags().String("new", "", "Path to the recompiled App binary to ship (required)")
 	patchPushCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
 	patchPushCmd.Flags().String("channel", "stable", "Release channel")
 	patchPushCmd.Flags().String("platform", "macos", "Platform (ios, android, macos)")
 	patchPushCmd.Flags().String("flutter-version", "", "Flutter version (used when auto-creating the release)")
 	patchPushCmd.Flags().String("app-version", "", "App version (used when auto-creating the release)")
+	patchPushCmd.Flags().String("match-mode", "", "Release match mode: build_id (default) or release_version")
 	patchPushCmd.Flags().String("release", "", "Explicit release ID (skips build_id match/create)")
 	patchPushCmd.Flags().Int("rollout", 100, "Rollout percentage 0-100")
 	patchPushCmd.Flags().Bool("mandatory", false, "Mark the patch mandatory (force-update)")
@@ -333,6 +364,7 @@ func init() {
 
 	patchStageLocalCmd.Flags().String("binary", "", "Path to the running/base App binary (required)")
 	patchStageLocalCmd.Flags().String("new", "", "Path to a recompiled App binary; present => kind=3 replacement")
+	patchStageLocalCmd.Flags().Bool("diff", false, "With --new: build a kind=4 DIFF patch (KBD1 delta) instead of kind=3 full")
 	patchStageLocalCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
 
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")
