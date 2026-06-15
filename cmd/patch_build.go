@@ -27,6 +27,54 @@ const (
 	kbPriceMarker = "KBPRICE@@@100@@@END"
 )
 
+// readMagic returns the first n bytes of a file for format detection.
+func readMagic(path string, n int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	head := make([]byte, n)
+	got, _ := f.Read(head)
+	return head[:got], nil
+}
+
+// analyzeAppBinary inspects a built Flutter App binary (Mach-O on macOS or ELF
+// libapp.so on Android, auto-detected) and returns the data needed to mint a
+// .kbpatch for it.
+func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
+	head, err := readMagic(appPath, 8)
+	if err != nil {
+		return nil, fmt.Errorf("read binary head: %w", err)
+	}
+	switch {
+	case isELF(head):
+		return analyzeELF(appPath)
+	case isMachO(head):
+		return analyzeMachO(appPath)
+	default:
+		return nil, fmt.Errorf("unrecognized binary format (not Mach-O or ELF): %s", appPath)
+	}
+}
+
+// extractSnapshotBlobs returns the raw isolate data + instructions blobs from a
+// built App binary (Mach-O or ELF) — the payload of a kind=3 whole-blob
+// replacement patch.
+func extractSnapshotBlobs(appPath string) (data []byte, instr []byte, err error) {
+	head, herr := readMagic(appPath, 8)
+	if herr != nil {
+		return nil, nil, fmt.Errorf("read binary head: %w", herr)
+	}
+	switch {
+	case isELF(head):
+		return extractSnapshotBlobsELF(appPath)
+	case isMachO(head):
+		return extractSnapshotBlobsMachO(appPath)
+	default:
+		return nil, nil, fmt.Errorf("unrecognized binary format (not Mach-O or ELF): %s", appPath)
+	}
+}
+
 // openAppMacho opens a built App binary as a thin arm64 Mach-O, handling the
 // universal/fat wrapper Flutter produces. Caller must call the returned closer.
 func openAppMacho(appPath string) (*macho.File, func() error, error) {
@@ -93,9 +141,9 @@ func symbolSectionSlice(mf *macho.File, symName string) ([]byte, error) {
 	return secData[startInSec:], nil
 }
 
-// analyzeAppBinary inspects a built Flutter App Mach-O and returns the data
-// needed to mint a .kbpatch for it (marker, identity, or whole-blob).
-func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
+// analyzeMachO inspects a built Flutter App Mach-O and returns the data needed
+// to mint a .kbpatch for it (marker, identity, or whole-blob).
+func analyzeMachO(appPath string) (*appBinaryInfo, error) {
 	raw, err := os.ReadFile(appPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read binary: %w", err)
@@ -135,9 +183,9 @@ func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
 	}, nil
 }
 
-// extractSnapshotBlobs returns the raw isolate data + instructions blobs from a
-// built App binary — the payload of a kind=3 whole-blob replacement patch.
-func extractSnapshotBlobs(appPath string) (data []byte, instr []byte, err error) {
+// extractSnapshotBlobsMachO returns the raw isolate data + instructions blobs
+// from a built Mach-O App binary.
+func extractSnapshotBlobsMachO(appPath string) (data []byte, instr []byte, err error) {
 	mf, closeFn, oerr := openAppMacho(appPath)
 	if oerr != nil {
 		return nil, nil, oerr

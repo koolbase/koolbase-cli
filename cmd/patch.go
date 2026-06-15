@@ -28,11 +28,12 @@ func koolbaseVmDir() (string, error) {
 	return filepath.Join(home, "Library", "Application Support", "koolbase", "vm"), nil
 }
 
-// patchPushCmd builds a kind=3 whole-blob replacement patch and ships it:
-// build → sign → create/match release → create draft → upload → (publish).
+// patchPushCmd builds a kind=3 whole-blob replacement (or kind=4 diff) patch and
+// ships it: build → sign → create/match release → create draft → upload → (publish).
 //
 //	--binary  the CURRENTLY RELEASED App binary (base devices run; build_id source)
 //	--new     the recompiled App binary with the changes to ship (payload)
+//	--diff    ship a kind=4 KBD1 diff instead of the full kind=3 blob
 //
 // Works on macOS (App) and Android (libapp.so) — format is auto-detected.
 var patchPushCmd = &cobra.Command{
@@ -57,6 +58,7 @@ var patchPushCmd = &cobra.Command{
 		mandatory, _ := cmd.Flags().GetBool("mandatory")
 		notes, _ := cmd.Flags().GetString("notes")
 		publish, _ := cmd.Flags().GetBool("publish")
+		asDiff, _ := cmd.Flags().GetBool("diff")
 
 		if appID == "" {
 			return fmt.Errorf("--app is required")
@@ -85,9 +87,30 @@ var patchPushCmd = &cobra.Command{
 		fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
 
 		fmt.Println("  Building patch...")
-		blob, err := buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
-		if err != nil {
-			return fmt.Errorf("patch build failed: %w", err)
+		var blob []byte
+		var kindDesc string
+		if asDiff {
+			// kind=4 diff: payload = KBD1 delta(baseBlob -> newBlob).
+			fmt.Println("  Extracting base snapshot for diff...")
+			baseData, baseInstr, berr := extractSnapshotBlobs(binary)
+			if berr != nil {
+				return fmt.Errorf("base-blob extraction failed: %w", berr)
+			}
+			fmt.Printf("  ✓ base snapshot (data %d, instr %d)\n", len(baseData), len(baseInstr))
+			blob, err = buildDiffPatch(base, baseData, baseInstr, newData, newInstr, keyPath)
+			if err != nil {
+				return fmt.Errorf("diff patch build failed: %w", err)
+			}
+			full := len(newData) + len(newInstr)
+			fmt.Printf("  ✓ diff payload: %d bytes vs %d full (%.1fx smaller)\n",
+				len(blob)-128, full, float64(full)/float64(len(blob)-128))
+			kindDesc = "kind=4 diff"
+		} else {
+			blob, err = buildWholeBlobReplacePatch(base, newData, newInstr, keyPath)
+			if err != nil {
+				return fmt.Errorf("patch build failed: %w", err)
+			}
+			kindDesc = "kind=3 replacement"
 		}
 		checksum := fmt.Sprintf("sha256:%x", sha256.Sum256(blob))
 		signature := fmt.Sprintf("%x", blob[64:128])
@@ -97,7 +120,7 @@ var patchPushCmd = &cobra.Command{
 			return fmt.Errorf("could not write temp patch: %w", err)
 		}
 		defer os.Remove(tmpPath)
-		fmt.Printf("  ✓ patch built (%d bytes, kind=3 replacement)\n", len(blob))
+		fmt.Printf("  ✓ patch built (%d bytes, %s)\n", len(blob), kindDesc)
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
@@ -171,6 +194,7 @@ var patchPushCmd = &cobra.Command{
 //
 //	--binary A            -> kind=2 IDENTITY (engine copies the running base)
 //	--binary A --new B     -> kind=3 REPLACEMENT (build_id from A, snapshot from B)
+//	--binary A --new B --diff -> kind=4 DIFF (KBD1 delta A->B)
 //
 // build_id is always computed from --binary (the running/base binary), so it
 // must be the exact App the patched engine will run.
@@ -361,6 +385,7 @@ func init() {
 	patchPushCmd.Flags().Bool("mandatory", false, "Mark the patch mandatory (force-update)")
 	patchPushCmd.Flags().String("notes", "", "Release notes")
 	patchPushCmd.Flags().Bool("publish", false, "Publish immediately after upload")
+	patchPushCmd.Flags().Bool("diff", false, "Build a kind=4 DIFF patch (KBD1 delta) instead of kind=3 full")
 
 	patchStageLocalCmd.Flags().String("binary", "", "Path to the running/base App binary (required)")
 	patchStageLocalCmd.Flags().String("new", "", "Path to a recompiled App binary; present => kind=3 replacement")
