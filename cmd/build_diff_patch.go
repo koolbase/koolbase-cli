@@ -55,7 +55,7 @@ func buildDiffPatch(base *appBinaryInfo, baseData, baseInstr, newData, newInstr 
 	targetHash := sha256.Sum256(newBlob)
 
 	// The diff payload.
-	delta := kbdiffEncode(baseBlob, newBlob)
+	delta := kbdiffEncode(baseBlob, newBlob, len(baseData), len(baseInstr))
 
 	// Self-verify: reconstruct from our own delta and confirm it byte-matches the
 	// target. A diff that can't be re-applied to produce the exact target must

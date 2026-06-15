@@ -12,7 +12,7 @@ import (
 // bsdiff-style suffix-array whole-file matching; streams raw-DEFLATE compressed (decoded by a vendored puff inflater in
 // the engine — version-proof, no engine-zlib dependency). The engine's
 // kbpatch reconstructs from these. Proven byte-exact against the C patcher.
-func kbdiffEncode(old, new []byte) []byte {
+func kbdiffEncode(old, new []byte, baseDataLen, baseInstrLen int) []byte {
 	ctrl, diff, extra := kbBsdiff(old, new)
 	zc := kbDeflate(ctrl)
 	zd := kbDeflate(diff)
@@ -26,6 +26,8 @@ func kbdiffEncode(old, new []byte) []byte {
 		out.Write(u8[:])
 	}
 	wu(len(new))
+	wu(baseDataLen)
+	wu(baseInstrLen)
 	wu(len(ctrl))
 	wu(len(zc))
 	wu(len(diff))

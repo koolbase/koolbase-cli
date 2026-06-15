@@ -12,12 +12,14 @@ import (
 // the Go twin of the engine's C kbpatch and of kbpatchEncode; the minter runs it
 // to self-verify every diff before shipping (reconstruct == target, else fail).
 func kbpatchDecode(old, delta []byte) ([]byte, error) {
-	if len(delta) < 4+8*7 || string(delta[0:4]) != "KBD1" {
+	if len(delta) < 4+8*9 || string(delta[0:4]) != "KBD1" {
 		return nil, fmt.Errorf("bad KBD1 header")
 	}
 	p := delta[4:]
 	rd := func() uint64 { v := binary.LittleEndian.Uint64(p[:8]); p = p[8:]; return v }
 	newLen := rd()
+	_ = rd() // baseDataLen (informational; caller already supplied old)
+	_ = rd() // baseInstrLen
 	cRaw := rd()
 	cLen := rd()
 	dRaw := rd()
