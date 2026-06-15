@@ -2,21 +2,21 @@ package cmd
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/flate"
 	"encoding/binary"
 )
 
 // kbdiffEncode produces a KBD1 delta such that kbpatch(old, delta) == new.
 // Format (KBD1): magic "KBD1" | newLen u64 | cRaw u64 | cLen u64 | dRaw u64 |
 // dLen u64 | eRaw u64 | eLen u64 | zlib(control)||zlib(diff)||zlib(extra).
-// bsdiff-style suffix-array whole-file matching; streams zlib-compressed (the
-// Flutter engine already links zlib, and Go has it in the stdlib). The engine's
+// bsdiff-style suffix-array whole-file matching; streams raw-DEFLATE compressed (decoded by a vendored puff inflater in
+// the engine — version-proof, no engine-zlib dependency). The engine's
 // kbpatch reconstructs from these. Proven byte-exact against the C patcher.
 func kbdiffEncode(old, new []byte) []byte {
 	ctrl, diff, extra := kbBsdiff(old, new)
-	zc := kbZlib(ctrl)
-	zd := kbZlib(diff)
-	ze := kbZlib(extra)
+	zc := kbDeflate(ctrl)
+	zd := kbDeflate(diff)
+	ze := kbDeflate(extra)
 
 	var out bytes.Buffer
 	out.WriteString("KBD1")
@@ -38,9 +38,12 @@ func kbdiffEncode(old, new []byte) []byte {
 	return out.Bytes()
 }
 
-func kbZlib(b []byte) []byte {
+// kbDeflate raw-DEFLATEs b (no zlib header/adler) so the engine's vendored puff
+// inflater can decode it without depending on the engine's zlib symbols/ABI —
+// version-proof across Flutter engine builds.
+func kbDeflate(b []byte) []byte {
 	var buf bytes.Buffer
-	w := zlib.NewWriter(&buf)
+	w, _ := flate.NewWriter(&buf, flate.DefaultCompression)
 	w.Write(b)
 	w.Close()
 	return buf.Bytes()

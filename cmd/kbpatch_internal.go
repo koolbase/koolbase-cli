@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/flate"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -85,10 +85,7 @@ func kbpatchDecode(old, delta []byte) ([]byte, error) {
 }
 
 func kbInflate(src []byte, rawLen uint64) ([]byte, error) {
-	r, err := zlib.NewReader(bytes.NewReader(src))
-	if err != nil {
-		return nil, err
-	}
+	r := flate.NewReader(bytes.NewReader(src))
 	defer r.Close()
 	out := make([]byte, 0, rawLen)
 	buf := bytes.NewBuffer(out)
