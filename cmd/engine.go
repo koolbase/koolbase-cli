@@ -166,7 +166,7 @@ e.g.:
 		dir, _ := engine.VersionDir(version)
 		fmt.Printf("\n✓ Installed %s\n", version)
 		fmt.Printf("  %s\n", dir)
-		fmt.Println("\nBuild with: koolbase build macos --release")
+		fmt.Printf("\nBuild with: koolbase build %s --release\n", targetPlatform())
 		return nil
 	},
 }
