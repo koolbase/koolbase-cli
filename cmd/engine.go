@@ -8,6 +8,7 @@ import (
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
 	"github.com/kennedyowusu/koolbase-cli/internal/engine"
 	"github.com/spf13/cobra"
+	"strings"
 )
 
 var engineCmd = &cobra.Command{
@@ -99,6 +100,12 @@ e.g.:
 			return fmt.Errorf("please specify a Flutter version, e.g. koolbase engine install 3.22.3")
 		}
 		flutterVersion := args[0]
+	// Accept both the bare Flutter version ("3.32.0") and the full
+	// Koolbase display string ("3.32.0-koolbase.1"). The registry matches
+	// on the bare version, so strip any "-koolbase.<rev>" suffix here.
+	if i := strings.Index(flutterVersion, "-koolbase."); i >= 0 {
+		flutterVersion = flutterVersion[:i]
+	}
 
 		cfg, err := config.Load()
 		if err != nil {
@@ -140,15 +147,13 @@ e.g.:
 		}
 
 		fmt.Printf("Downloading %s (%.0f MB)...\n", version, float64(dl.SizeBytes)/(1024*1024))
-		var lastPct int
 		progress := func(downloaded, total int64) {
-			if total <= 0 {
-				return
-			}
-			pct := int(float64(downloaded) / float64(total) * 100)
-			if pct != lastPct && pct%5 == 0 {
-				fmt.Printf("\r  %d%%", pct)
-				lastPct = pct
+			mb := float64(downloaded) / (1024 * 1024)
+			if total > 0 {
+				pct := int(float64(downloaded) / float64(total) * 100)
+				fmt.Printf("\r  %d%% (%.0f/%.0f MB)   ", pct, mb, float64(total)/(1024*1024))
+			} else {
+				fmt.Printf("\r  %.0f MB downloaded   ", mb)
 			}
 		}
 

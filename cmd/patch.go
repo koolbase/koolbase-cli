@@ -66,7 +66,8 @@ var patchPushCmd = &cobra.Command{
 		if binary == "" {
 			return fmt.Errorf("--binary is required (the released/base App binary)")
 		}
-		if newBin == "" {
+		asIdentity, _ := cmd.Flags().GetBool("identity")
+		if newBin == "" && !asIdentity {
 			return fmt.Errorf("--new is required (the recompiled App binary to ship)")
 		}
 
@@ -79,17 +80,28 @@ var patchPushCmd = &cobra.Command{
 		fmt.Printf("  ✓ base build_id %s (instr_size %d, data_size %d)\n",
 			buildID, base.InstrSize, base.DataSize)
 
-		fmt.Println("  Extracting new snapshot...")
-		newData, newInstr, eerr := extractSnapshotBlobs(newBin)
-		if eerr != nil {
-			return fmt.Errorf("new-blob extraction failed: %w", eerr)
-		}
-		fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
-
-		fmt.Println("  Building patch...")
 		var blob []byte
 		var kindDesc string
-		if asDiff {
+		var newData, newInstr []byte
+		if !asIdentity {
+			fmt.Println("  Extracting new snapshot...")
+			var eerr error
+			newData, newInstr, eerr = extractSnapshotBlobs(newBin)
+			if eerr != nil {
+				return fmt.Errorf("new-blob extraction failed: %w", eerr)
+			}
+			fmt.Printf("  ✓ new snapshot (data %d, instr %d)\n", len(newData), len(newInstr))
+		}
+
+		fmt.Println("  Building patch...")
+		if asIdentity {
+			// kind=2 IDENTITY (internal/dev; engine reuses running base snapshot).
+			blob, err = buildWholeBlobPatch(base, keyPath)
+			if err != nil {
+				return fmt.Errorf("identity patch build failed: %w", err)
+			}
+			kindDesc = "kind=2 identity"
+		} else if asDiff {
 			// kind=4 diff: payload = KBD1 delta(baseBlob -> newBlob).
 			fmt.Println("  Extracting base snapshot for diff...")
 			baseData, baseInstr, berr := extractSnapshotBlobs(binary)
@@ -386,6 +398,7 @@ func init() {
 	patchPushCmd.Flags().String("notes", "", "Release notes")
 	patchPushCmd.Flags().Bool("publish", false, "Publish immediately after upload")
 	patchPushCmd.Flags().Bool("diff", false, "Build a kind=4 DIFF patch (KBD1 delta) instead of kind=3 full")
+	patchPushCmd.Flags().Bool("identity", false, "Build a kind=2 IDENTITY patch (internal/dev; engine reuses running base)")
 
 	patchStageLocalCmd.Flags().String("binary", "", "Path to the running/base App binary (required)")
 	patchStageLocalCmd.Flags().String("new", "", "Path to a recompiled App binary; present => kind=3 replacement")
