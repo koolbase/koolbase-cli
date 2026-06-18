@@ -65,7 +65,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 	if !installed {
 		return fmt.Errorf("engine %s not installed — run: koolbase engine install %s",
-			version, strings.TrimSuffix(version, "-koolbase.1"))
+			version, baseFlutterVersion(version))
 	}
 
 	engineDir, err := engine.VersionDir(version)
@@ -108,7 +108,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	// Preflight: fail fast and legibly if the SDK version doesn't match the engine.
-	wantFlutter := strings.TrimSuffix(version, "-koolbase.1")
+	wantFlutter := baseFlutterVersion(version)
 	if verr := verifyFlutterVersion(flutterBin, wantFlutter); verr != nil {
 		return verr
 	}
@@ -175,8 +175,19 @@ func runBuild(cmd *cobra.Command, args []string) error {
 // Resolution order: --flutter-sdk flag, then saved config, then PATH. When
 // falling back to PATH, a caveat is printed because PATH flutter is very likely
 // the developer's day-to-day SDK, which usually won't match the engine version.
+// baseFlutterVersion strips the Koolbase engine suffix "-koolbase.<rev>" from an
+// engine version, yielding the underlying Flutter version. Handles any revision,
+// e.g. "3.44.0-koolbase.2" -> "3.44.0", "3.32.0-koolbase.1" -> "3.32.0". A version
+// with no suffix is returned unchanged.
+func baseFlutterVersion(engineVersion string) string {
+	if i := strings.Index(engineVersion, "-koolbase."); i >= 0 {
+		return engineVersion[:i]
+	}
+	return engineVersion
+}
+
 func resolveFlutterBin(engineVersion string) (bin string, source string, err error) {
-	flutterVersion := strings.TrimSuffix(engineVersion, "-koolbase.1")
+	flutterVersion := baseFlutterVersion(engineVersion)
 
 	// 1. Explicit flag.
 	if buildFlutterSDK != "" {
