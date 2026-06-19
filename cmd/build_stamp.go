@@ -30,7 +30,7 @@ func androidEngineConfig(targetArch string) (config, abiPrefix string, ok bool) 
 	case "arm64", "arm64-v8a", "":
 		return "android_release_arm64", "arm64_v8a", true
 	case "arm", "armeabi-v7a":
-		return "android_release_arm", "armeabi_v7a", true
+		return "android_release", "armeabi_v7a", true
 	default:
 		return "", "", false
 	}
