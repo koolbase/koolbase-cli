@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"runtime"
 
+	"strings"
+
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
 	"github.com/kennedyowusu/koolbase-cli/internal/engine"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
 var engineCmd = &cobra.Command{
@@ -40,10 +41,34 @@ func hostPlatform() string {
 	}
 }
 
-// targetPlatform/targetArch are what the built app runs on. The launch targets
-// Android/arm64; these are the defaults until a --target flag is added.
+// targetPlatform/targetArch are what the built app runs on. targetPlatform is
+// Android for now; targetArch is selected by the --target-arch flag on install
+// and list, normalized to a canonical registry token (arm64 | arm).
 func targetPlatform() string { return "android" }
-func targetArch() string     { return "arm64" }
+func targetArch() string {
+	if a, ok := canonicalTargetArch(engineTargetArch); ok {
+		return a
+	}
+	return "arm64"
+}
+
+// engineTargetArch holds the --target-arch flag value for install/list. Default
+// arm64 keeps existing behavior; "arm" selects armeabi-v7a.
+var engineTargetArch string
+
+// canonicalTargetArch normalizes any accepted --target-arch spelling to the
+// canonical registry token (arm64 | arm) that publish writes and install/list
+// query with, so the two ends can never drift. ok is false for unknown values.
+func canonicalTargetArch(s string) (string, bool) {
+	switch s {
+	case "arm64", "arm64-v8a", "":
+		return "arm64", true
+	case "arm", "armeabi-v7a":
+		return "arm", true
+	default:
+		return "", false
+	}
+}
 
 var engineListCmd = &cobra.Command{
 	Use:   "list",
@@ -100,12 +125,12 @@ e.g.:
 			return fmt.Errorf("please specify a Flutter version, e.g. koolbase engine install 3.22.3")
 		}
 		flutterVersion := args[0]
-	// Accept both the bare Flutter version ("3.32.0") and the full
-	// Koolbase display string ("3.32.0-koolbase.1"). The registry matches
-	// on the bare version, so strip any "-koolbase.<rev>" suffix here.
-	if i := strings.Index(flutterVersion, "-koolbase."); i >= 0 {
-		flutterVersion = flutterVersion[:i]
-	}
+		// Accept both the bare Flutter version ("3.32.0") and the full
+		// Koolbase display string ("3.32.0-koolbase.1"). The registry matches
+		// on the bare version, so strip any "-koolbase.<rev>" suffix here.
+		if i := strings.Index(flutterVersion, "-koolbase."); i >= 0 {
+			flutterVersion = flutterVersion[:i]
+		}
 
 		cfg, err := config.Load()
 		if err != nil {
@@ -140,9 +165,11 @@ e.g.:
 			version = flutterVersion + "-koolbase.1" // fallback
 		}
 
-		installed, _ := engine.IsInstalled(version)
+		androidCfg, _, _ := androidEngineConfig(targetA)
+		installed, _ := engine.IsInstalledArch(version, androidCfg)
+
 		if installed {
-			fmt.Printf("Engine %s already installed.\n", version)
+			fmt.Printf("Engine %s (%s) already installed.\n", version, targetA)
 			return nil
 		}
 
@@ -157,7 +184,7 @@ e.g.:
 			}
 		}
 
-		if err := engine.Install(version, dl.URL, dl.SHA256, dl.Signature, dl.SizeBytes, progress); err != nil {
+		if err := engine.Install(version, androidCfg, dl.URL, dl.SHA256, dl.Signature, dl.SizeBytes, progress); err != nil {
 			fmt.Println()
 			return err
 		}
@@ -220,4 +247,7 @@ func init() {
 	engineCmd.AddCommand(engineInstallCmd)
 	engineCmd.AddCommand(enginePathCmd)
 	engineCmd.AddCommand(engineRemoveCmd)
+
+	engineListCmd.Flags().StringVar(&engineTargetArch, "target-arch", "arm64", "Target ABI to list: arm64 (default) or arm (armeabi-v7a)")
+	engineInstallCmd.Flags().StringVar(&engineTargetArch, "target-arch", "arm64", "Target ABI to install: arm64 (default) or arm (armeabi-v7a)")
 }

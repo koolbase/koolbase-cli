@@ -82,6 +82,25 @@ func IsInstalled(version string) (bool, error) {
 	return len(entries) > 0, nil
 }
 
+// IsInstalledArch reports whether a specific android target config is installed
+// for a version — i.e. <version>/src/out/<androidConfig> exists and is non-empty.
+// Lets multiple target arches coexist under one version dir.
+func IsInstalledArch(version, androidConfig string) (bool, error) {
+	dir, err := VersionDir(version)
+	if err != nil {
+		return false, err
+	}
+	cfgDir := filepath.Join(dir, "src", "out", androidConfig)
+	entries, err := os.ReadDir(cfgDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // ListInstalled returns the version strings of all locally-installed engines.
 func ListInstalled() ([]string, error) {
 	base, err := InstallDir()
@@ -123,8 +142,8 @@ type ProgressFunc func(downloaded, total int64)
 // Install downloads the engine zip from signedURL, verifies its SHA-256
 // against wantSHA, and extracts it into ~/.koolbase/engines/{version}/.
 // If the version is already installed it returns nil without re-downloading.
-func Install(version, signedURL, wantSHA, wantSig string, totalBytes int64, progress ProgressFunc) error {
-	installed, err := IsInstalled(version)
+func Install(version, androidConfig, signedURL, wantSHA, wantSig string, totalBytes int64, progress ProgressFunc) error {
+	installed, err := IsInstalledArch(version, androidConfig)
 	if err != nil {
 		return err
 	}
@@ -203,9 +222,6 @@ func Install(version, signedURL, wantSHA, wantSig string, totalBytes int64, prog
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(finalDir); err != nil {
-		return fmt.Errorf("clear final dir: %w", err)
-	}
 
 	inner, err := singleTopLevelDir(stageDir)
 	if err != nil {
@@ -215,14 +231,67 @@ func Install(version, signedURL, wantSHA, wantSig string, totalBytes int64, prog
 	if inner != "" {
 		src = filepath.Join(stageDir, inner)
 	}
-	if err := os.Rename(src, finalDir); err != nil {
-		return fmt.Errorf("install rename: %w", err)
+	// First arch for this version: fast atomic rename. Additional arch: merge the
+	// new config in without disturbing other arches already installed.
+	if _, statErr := os.Stat(finalDir); os.IsNotExist(statErr) {
+		if err := os.Rename(src, finalDir); err != nil {
+			return fmt.Errorf("install rename: %w", err)
+		}
+	} else {
+		if err := mergeTree(src, finalDir); err != nil {
+			return fmt.Errorf("install merge: %w", err)
+		}
 	}
 
 	return nil
 }
 
+// mergeTree recursively copies src into dst, creating directories as needed and
+// overwriting existing files. Unlike os.Rename it merges into an existing dst,
+// so installing a second target arch adds its config without removing others.
+func mergeTree(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		return copyFileMode(path, target)
+	})
+}
+
+// copyFileMode copies a regular file from src to dst, creating parent dirs and
+// preserving the source file mode.
+func copyFileMode(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
 // singleTopLevelDir returns the name of the sole directory at the root of
+
 // dir, or "" if there are multiple entries / files at the root.
 func singleTopLevelDir(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)

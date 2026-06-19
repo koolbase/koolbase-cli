@@ -78,7 +78,14 @@ func runEnginePublish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--engine-src is required (path to engine/src/out)")
 	}
 
+	canonArch, ok := canonicalTargetArch(pubTargetArch)
+	if !ok {
+		return fmt.Errorf("unsupported --target-arch %q — use 'arm64' or 'arm'", pubTargetArch)
+	}
+	pubTargetArch = canonArch
+
 	version := fmt.Sprintf("%s-koolbase.%d", pubFlutterVersion, pubRevision)
+
 	fmt.Printf("Publishing engine %s\n", version)
 	fmt.Printf("  host:   %s/%s\n  target: %s/%s\n\n", pubHostPlatform(), pubHostArch, pubTargetPlatform, pubTargetArch)
 

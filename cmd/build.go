@@ -60,13 +60,26 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		version = resolved
 	}
 
-	installed, err := engine.IsInstalled(version)
+	var (
+		installed bool
+		err       error
+	)
+	if platform == "android" {
+		androidCfg, _, _ := androidEngineConfig(buildTargetArch)
+		installed, err = engine.IsInstalledArch(version, androidCfg)
+	} else {
+		installed, err = engine.IsInstalled(version)
+	}
 	if err != nil {
 		return err
 	}
 	if !installed {
-		return fmt.Errorf("engine %s not installed — run: koolbase engine install %s",
+		msg := fmt.Sprintf("engine %s is not installed for this target — run: koolbase engine install %s",
 			version, baseFlutterVersion(version))
+		if platform == "android" && buildTargetArch != "" && buildTargetArch != "arm64" {
+			msg += " --target-arch " + buildTargetArch
+		}
+		return fmt.Errorf("%s", msg)
 	}
 
 	engineDir, err := engine.VersionDir(version)
