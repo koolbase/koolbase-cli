@@ -137,6 +137,16 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		"--local-engine-host=" + localEngineHost,
 		"--local-engine-src-path=" + srcPath,
 	}
+	// Restrict the APK to the single target ABI so it matches the single-ABI
+	// local engine. Otherwise plugin .so for other ABIs make Android pick a
+	// primaryCpuAbi (e.g. arm64) with no matching libflutter.so → dlopen crash.
+	if platform == "android" {
+		tp := "android-arm64"
+		if buildTargetArch == "arm" || buildTargetArch == "armeabi-v7a" {
+			tp = "android-arm"
+		}
+		flutterArgs = append(flutterArgs, "--target-platform="+tp)
+	}
 	if buildRelease {
 		flutterArgs = append(flutterArgs, "--release")
 	}
