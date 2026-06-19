@@ -24,6 +24,7 @@ var (
 	pubRevision       int
 	pubKeyPath        string
 	pubKeepZip        bool
+	pubTargetArch     string
 )
 
 // enginePublishCmd packs, signs, uploads, registers, and publishes a Koolbase
@@ -51,7 +52,6 @@ Example:
 const (
 	pubHostArch       = "arm64" // host build arch (Apple silicon)
 	pubTargetPlatform = "android"
-	pubTargetArch     = "arm64"
 )
 
 func pubHostPlatform() string {
@@ -85,7 +85,7 @@ func runEnginePublish(cmd *cobra.Command, args []string) error {
 	// 1. Pack lean artifact.
 	stageDir := filepath.Join(home, ".koolbase-pack", version)
 	fmt.Println("==> 1/6 Packing lean engine…")
-	if err := packLeanEngine(pubEngineSrc, stageDir, version); err != nil {
+	if err := packLeanEngine(pubEngineSrc, stageDir, version, pubTargetArch); err != nil {
 		return fmt.Errorf("pack: %w", err)
 	}
 
@@ -338,5 +338,6 @@ func init() {
 	enginePublishCmd.Flags().IntVar(&pubRevision, "revision", 1, "Koolbase engine revision")
 	enginePublishCmd.Flags().StringVar(&pubKeyPath, "key", "", "Ed25519 engine signing key path")
 	enginePublishCmd.Flags().BoolVar(&pubKeepZip, "keep-zip", false, "Keep the built zip after publishing")
+	enginePublishCmd.Flags().StringVar(&pubTargetArch, "target-arch", "arm64", "Target ABI: arm64 (arm64-v8a, default) or arm (armeabi-v7a)")
 	engineCmd.AddCommand(enginePublishCmd)
 }

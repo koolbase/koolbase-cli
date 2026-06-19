@@ -10,6 +10,32 @@ import (
 	"strings"
 )
 
+// androidABIDir maps a --target-arch value to its Android ABI directory name
+// inside the APK (lib/<abiDir>/). Defaults to arm64-v8a.
+func androidABIDir(targetArch string) string {
+	switch targetArch {
+	case "arm", "armeabi-v7a":
+		return "armeabi-v7a"
+	default: // "arm64", "arm64-v8a", ""
+		return "arm64-v8a"
+	}
+}
+
+// androidEngineConfig maps a --target-arch value to the Flutter engine build
+// config dir (out/<config>) and the per-ABI artifact prefix used by the engine
+// JAR/POM names. ok is false for unrecognized values. Single source of truth
+// shared by `koolbase build` and `koolbase engine publish`.
+func androidEngineConfig(targetArch string) (config, abiPrefix string, ok bool) {
+	switch targetArch {
+	case "arm64", "arm64-v8a", "":
+		return "android_release_arm64", "arm64_v8a", true
+	case "arm", "armeabi-v7a":
+		return "android_release_arm", "armeabi_v7a", true
+	default:
+		return "", "", false
+	}
+}
+
 // stampBuildIDIntoAssets is the invisible Android stamping step run by
 // `koolbase build android`. It computes the build_id from the freshly built
 // libapp.so and writes it into assets/koolbase_build_id so the SDK can report
@@ -19,8 +45,8 @@ import (
 // updated (caller rebuilds once so the asset is bundled); false means the asset
 // already held this build_id (idempotent — no rebuild needed). Asset-only
 // changes do NOT alter the build_id (verified on-device), so the rebuild is safe.
-func stampBuildIDIntoAssets(projectDir, apkPath string) (buildID string, changed bool, err error) {
-	libapp, cleanup, err := extractLibappFromAPK(apkPath)
+func stampBuildIDIntoAssets(projectDir, apkPath, abiDir string) (buildID string, changed bool, err error) {
+	libapp, cleanup, err := extractLibappFromAPK(apkPath, abiDir)
 	if err != nil {
 		return "", false, fmt.Errorf("locate libapp.so: %w", err)
 	}
@@ -55,16 +81,17 @@ func stampBuildIDIntoAssets(projectDir, apkPath string) (buildID string, changed
 	return buildID, changed, nil
 }
 
-// extractLibappFromAPK pulls lib/arm64-v8a/libapp.so out of the APK into a temp
-// file and returns its path plus a cleanup func.
-func extractLibappFromAPK(apkPath string) (string, func(), error) {
+// extractLibappFromAPK pulls lib/<abiDir>/libapp.so out of the APK into a temp
+// file and returns its path plus a cleanup func. abiDir is the Android ABI
+// directory name, e.g. "arm64-v8a" or "armeabi-v7a".
+func extractLibappFromAPK(apkPath, abiDir string) (string, func(), error) {
 	r, err := zip.OpenReader(apkPath)
 	if err != nil {
 		return "", func() {}, err
 	}
 	defer r.Close()
 
-	const want = "lib/arm64-v8a/libapp.so"
+	want := "lib/" + abiDir + "/libapp.so"
 	var zf *zip.File
 	for _, f := range r.File {
 		if f.Name == want {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	buildRelease    bool
-	buildVersion    string
-	buildFlutterSDK string
+	buildRelease     bool
+	buildVersion     string
+	buildFlutterSDK  string
 	buildNoTreeShake bool
+	buildTargetArch  string
 )
 
 var buildCmd = &cobra.Command{
@@ -88,7 +89,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	var localEngine, localEngineHost, flutterSubcmd string
 	switch platform {
 	case "android":
-		localEngine = "android_release_arm64"
+		cfg, _, ok := androidEngineConfig(buildTargetArch)
+		if !ok {
+			return fmt.Errorf("unsupported --target-arch %q — use 'arm64' or 'arm'", buildTargetArch)
+		}
+		localEngine = cfg
 		localEngineHost = "host_release_arm64"
 		flutterSubcmd = "apk"
 	default: // macos
@@ -146,7 +151,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		projectDir, _ := os.Getwd()
 		apkPath := filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", "app-release.apk")
 		fmt.Println("\n  Stamping build_id...")
-		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, apkPath)
+		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, apkPath, androidABIDir(buildTargetArch))
 		if serr != nil {
 			return fmt.Errorf("stamp build_id: %w", serr)
 		}
@@ -321,4 +326,5 @@ func init() {
 	buildCmd.Flags().StringVar(&buildVersion, "engine", "", "Engine version to use (e.g. 3.22.3-koolbase.1)")
 	buildCmd.Flags().StringVar(&buildFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK (e.g. ~/flutter-3.22.3)")
 	buildCmd.Flags().BoolVar(&buildNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking (keeps all icon glyphs; larger bundle)")
+	buildCmd.Flags().StringVar(&buildTargetArch, "target-arch", "arm64", "Android target ABI: arm64 (arm64-v8a, default) or arm (armeabi-v7a)")
 }

@@ -10,13 +10,18 @@ import (
 )
 
 // packLeanEngine copies the empirically-proven minimal engine file set from the
-// build out-dir into stageDir/src/out/{android_release_arm64,host_release_arm64}/.
-// This mirrors pack_engine.sh: the raw out-dirs are ~20GB of build intermediates;
-// only this subset is consumed by a --local-engine Android build (proven by a real
-// build succeeding against exactly these files).
-func packLeanEngine(engineSrcOut, stageDir, version string) error {
+// build out-dir into stageDir/src/out/{<android-config>,host_release_arm64}/,
+// where <android-config> is android_release_arm64 (arm64) or android_release_arm
+// (arm). This mirrors pack_engine.sh: the raw out-dirs are ~20GB of build
+// intermediates; only this subset is consumed by a --local-engine Android build
+// (proven by a real build succeeding against exactly these files).
+func packLeanEngine(engineSrcOut, stageDir, version, targetArch string) error {
+	androidConfig, jarABI, ok := androidEngineConfig(targetArch)
+	if !ok {
+		return fmt.Errorf("unsupported target-arch %q — use 'arm64' or 'arm'", targetArch)
+	}
 	srcOut := filepath.Join(stageDir, "src", "out")
-	androidDst := filepath.Join(srcOut, "android_release_arm64")
+	androidDst := filepath.Join(srcOut, androidConfig)
 	hostDst := filepath.Join(srcOut, "host_release_arm64")
 
 	// Clean any prior staging for this version.
@@ -29,7 +34,7 @@ func packLeanEngine(engineSrcOut, stageDir, version string) error {
 		}
 	}
 
-	androidSrc := filepath.Join(engineSrcOut, "android_release_arm64")
+	androidSrc := filepath.Join(engineSrcOut, androidConfig)
 	hostSrc := filepath.Join(engineSrcOut, "host_release_arm64")
 
 	// --- android target artifacts ---
@@ -42,7 +47,7 @@ func packLeanEngine(engineSrcOut, stageDir, version string) error {
 	// named files (traced + known-essential); missing ones are skipped with a note.
 	androidFiles := []string{
 		"gen_snapshot",
-		"arm64_v8a_release.jar", "arm64_v8a_release.maven-metadata.xml", "arm64_v8a_release.pom",
+		jarABI + "_release.jar", jarABI + "_release.maven-metadata.xml", jarABI + "_release.pom",
 		"flutter_embedding_release.jar", "flutter_embedding_release.maven-metadata.xml", "flutter_embedding_release.pom",
 		"libflutter.so", "icudtl.dat",
 	}
