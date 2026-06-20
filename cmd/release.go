@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kennedyowusu/koolbase-cli/internal/api"
+	"github.com/kennedyowusu/koolbase-cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +20,8 @@ var (
 	releaseFlutterSDK  string
 	releaseArchs       []string
 	releaseNoTreeShake bool
+	releaseProject     string
+	releaseChannel     string
 )
 
 // koolbaseBuildIDAsset is the AAB path of the stamped build_id asset. In a
@@ -184,6 +188,37 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	for abi, bid := range buildIDMap {
 		fmt.Printf("    %-13s build_id %s\n", abi, bid)
 	}
+
+	// Register a build_id release per ABI so the resolver can serve patches to
+	// each ABI's devices. build_id mode: each ABI build_id is its own release;
+	// app_version groups them. CreateRelease is idempotent server-side.
+	cfg, cerr := config.Load()
+	projectID := releaseProject
+	if cerr == nil && projectID == "" {
+		projectID = cfg.ProjectID
+	}
+	if cerr != nil || projectID == "" || cfg.APIKey == "" {
+		fmt.Println("\nWARNING: releases NOT registered (no --project and no saved login).")
+		fmt.Println("  Code Push cannot serve patches to these build_ids until registered.")
+	} else {
+		appVersion := readPubspecVersion(projectDir)
+		apiClient := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		fmt.Println("\n=== registering releases ===")
+		for _, a := range arts {
+			rel, rerr := apiClient.CreateRelease(projectID, api.CreateReleaseRequest{
+				BuildID:        a.buildID,
+				FlutterVersion: baseFlutterVersion(version),
+				Platform:       "android",
+				AppVersion:     appVersion,
+				MatchMode:      "build_id",
+				Channel:        releaseChannel,
+			})
+			if rerr != nil {
+				return fmt.Errorf("register release for %s (build_id %s): %w", a.abiDir, a.buildID, rerr)
+			}
+			fmt.Printf("  registered %s -> release %s (build_id %s, channel %s)\n", a.abiDir, rel.ID, a.buildID, releaseChannel)
+		}
+	}
 	if len(extraAbis) > 0 {
 		fmt.Printf("\n\u26a0 %s present (plugin libs) but Koolbase has no engine for %s yet.\n",
 			strings.Join(extraAbis, ", "), strings.Join(extraAbis, "/"))
@@ -345,10 +380,28 @@ func abiFiltersList(dirs []string) string {
 	return strings.Join(q, ", ")
 }
 
+// readPubspecVersion returns the project's pubspec version (e.g. "1.0.0+1"),
+// used as the release app_version for grouping. Empty if not found.
+func readPubspecVersion(projectDir string) string {
+	data, err := os.ReadFile(filepath.Join(projectDir, "pubspec.yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "version:") {
+			return strings.TrimSpace(strings.TrimPrefix(t, "version:"))
+		}
+	}
+	return ""
+}
+
 func init() {
 	releaseCmd.Flags().StringVar(&releaseEngine, "engine", "", "Engine version to use (e.g. 3.44.0-koolbase.2)")
 	releaseCmd.Flags().StringVar(&releaseFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK")
 	releaseCmd.Flags().StringSliceVar(&releaseArchs, "target-archs", []string{"arm64", "arm"}, "Target ABIs (comma-separated): arm64,arm")
 	releaseCmd.Flags().BoolVar(&releaseNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking")
+	releaseCmd.Flags().StringVar(&releaseProject, "project", "", "Koolbase project/app ID (defaults to saved config)")
+	releaseCmd.Flags().StringVar(&releaseChannel, "channel", "stable", "Release channel for the registered releases")
 	rootCmd.AddCommand(releaseCmd)
 }
