@@ -68,6 +68,14 @@ func buildDiffPatch(base *appBinaryInfo, baseData, baseInstr, newData, newInstr 
 		return nil, fmt.Errorf("diff self-verify FAILED: reconstructed blob != target (len %d vs %d)", len(recon), len(newBlob))
 	}
 
+	// Heads-up if the diff barely compressed. A delta that is a large fraction of
+	// the full snapshot means base and new share almost no bytes — in practice
+	// that's --new built with different flags than the released base (--flavor /
+	// --dart-define / --obfuscate / --target all reshuffle bytes app-wide), which
+	// is the gap left by patch's binary-in design. Non-fatal: a genuine large
+	// change trips it too, so it's a heads-up, not a hard error.
+	warnIfLargeDiff(len(delta), len(newBlob))
+
 	header := make([]byte, 128)
 	copy(header[0:4], []byte("KBPM"))
 	binary.LittleEndian.PutUint16(header[4:6], 1)
@@ -87,5 +95,28 @@ func buildDiffPatch(base *appBinaryInfo, baseData, baseInstr, newData, newInstr 
 	return out, nil
 }
 
+// largeDiffWarnFraction is the delta/full ratio at or above which buildDiffPatch
+// warns. Below it (the diff is at least 2x smaller than the full snapshot) is the
+// normal range for a real code change; at/above it the base and new binaries share
+// almost no bytes, which in practice means a build-flag mismatch on --new.
+const largeDiffWarnFraction = 0.5
+
+// warnIfLargeDiff prints a non-fatal heads-up when a kind=4 delta is an unusually
+// large fraction of the full snapshot it reconstructs.
+func warnIfLargeDiff(deltaLen, fullLen int) {
+	if fullLen <= 0 || deltaLen <= 0 {
+		return
+	}
+	frac := float64(deltaLen) / float64(fullLen)
+	if frac < largeDiffWarnFraction {
+		return
+	}
+	fmt.Printf("\n  \u26a0 diff is %.0f%% of the full snapshot (only %.1fx smaller) — unusually large.\n",
+		frac*100, float64(fullLen)/float64(deltaLen))
+	fmt.Println("    The usual cause is --new built with different flags than the released")
+	fmt.Println("    base: --flavor / --dart-define / --obfuscate / --target.")
+	fmt.Println("    Rebuild --new with the SAME flags as the release, then re-run.")
+	fmt.Println("    (Disregard if you genuinely shipped a large change.)")
+}
 
 func bytesEqual(a, b []byte) bool { return bytes.Equal(a, b) }
