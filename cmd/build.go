@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,33 +16,49 @@ import (
 )
 
 var (
-	buildRelease     bool
-	buildVersion     string
-	buildFlutterSDK  string
-	buildNoTreeShake bool
-	buildTargetArch  string
+	buildRelease             bool
+	buildVersion             string
+	buildFlutterSDK          string
+	buildNoTreeShake         bool
+	buildTargetArch          string
+	buildFlavor              string
+	buildDartDefines         []string
+	buildDartDefineFromFiles []string
 )
 
 var buildCmd = &cobra.Command{
-	Use:   "build [platform]",
+	Use:   "build [platform] [-- <flutter flags>]",
 	Short: "Build your Flutter app with the Koolbase engine (enables Code Push)",
 	Long: `Build a Flutter app using the installed Koolbase engine so the result
 supports Code Push.
 
 This wraps 'flutter build' with the correct --local-engine flags pointing at
-the Koolbase engine you installed via 'koolbase engine install'. You don't need
-to manage those flags yourself.
+the Koolbase engine you installed via 'koolbase engine install'. Koolbase owns
+only engine selection, the --local-engine wiring, --target-platform and build_id
+stamping; everything that shapes the app itself — flavor, dart-defines, the
+entrypoint, obfuscation — is yours and is forwarded straight to flutter.
+
+First-class flags Koolbase acts on or that carry a parsing footgun:
+  --flavor                 selects the gradle product flavor (also renames outputs)
+  --dart-define KEY=VALUE  repeatable; values may contain commas / URLs / JSON
+  --dart-define-from-file  repeatable
+
+Anything else flutter accepts — --target, --build-name, --build-number,
+--obfuscate, --split-debug-info, … — goes after a '--' separator and is passed
+through untouched:
+
+  koolbase build android --release --flavor prod -- --build-name=1.2.3 --obfuscate --split-debug-info=build/symbols
 
 IMPORTANT: the Flutter SDK version must match the engine's Flutter version
-(e.g. an engine built for Flutter 3.22.3 needs the 3.22.3 SDK). Point Koolbase
-at the matching SDK with --flutter-sdk, or save it once:
-
-  koolbase build macos --release --flutter-sdk ~/flutter-3.22.3
+(e.g. an engine built for Flutter 3.44.0 needs the 3.44.0 SDK). Point Koolbase
+at the matching SDK with --flutter-sdk, or save it once.
 
 Examples:
-  koolbase build macos --release --flutter-sdk ~/flutter-3.22.3
-  koolbase build macos --release --engine 3.22.3-koolbase.1`,
-	Args: cobra.ExactArgs(1),
+  koolbase build android --release --flutter-sdk ~/flutter-3.44.0
+  koolbase build android --release --target-arch arm --flavor prod
+  koolbase build android --release --flavor prod --dart-define API_URL=https://api.example.com
+  koolbase build macos  --release --engine 3.22.3-koolbase.1`,
+	Args: oneArgBeforeDash,
 	RunE: runBuild,
 }
 
@@ -48,6 +66,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	platform := args[0]
 	if platform != "macos" && platform != "android" {
 		return fmt.Errorf("platform %q not supported — use 'macos' or 'android'", platform)
+	}
+
+	// Everything after '--' is forwarded to flutter verbatim (e.g. --target,
+	// --build-name, --build-number, --obfuscate, --split-debug-info).
+	var passthrough []string
+	if d := cmd.ArgsLenAtDash(); d >= 0 {
+		passthrough = append(passthrough, args[d:]...)
 	}
 
 	// Resolve which engine to use.
@@ -87,7 +112,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// The engine archive lays out as {version}/src/out/mac_release_arm64.
+	// The engine archive lays out as {version}/src/out/<config>.
 	// Flutter's --local-engine-src-path wants the dir containing out/.
 	srcPath := filepath.Join(engineDir, "src")
 	if _, err := os.Stat(filepath.Join(srcPath, "out")); err != nil {
@@ -116,11 +141,8 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve the flutter binary. The SDK version MUST match the engine's
-	// Flutter version or Dart compilation fails (framework source compiled
-	// against a mismatched Dart SDK). Resolution order:
-	//   1. --flutter-sdk flag
-	//   2. saved config (FlutterSDKPath)
-	//   3. flutter on PATH (with a mismatch caveat printed)
+	// Flutter version or Dart compilation fails. Resolution order:
+	//   1. --flutter-sdk flag  2. saved config  3. flutter on PATH (with caveat).
 	flutterBin, sdkSource, err := resolveFlutterBin(version)
 	if err != nil {
 		return err
@@ -150,37 +172,60 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if buildRelease {
 		flutterArgs = append(flutterArgs, "--release")
 	}
-
-	// Koolbase engines ship the icon tree-shaker host tools (const_finder +
-	// font-subset), so tree-shaking works by default and produces smaller
-	// bundles. --no-tree-shake-icons opts out if a build ever needs it.
+	// Koolbase engines ship the icon tree-shaker host tools, so tree-shaking
+	// works by default. --no-tree-shake-icons opts out if a build needs it.
 	if buildNoTreeShake {
 		flutterArgs = append(flutterArgs, "--no-tree-shake-icons")
 	}
+
+	// Developer's app-shaping flags, forwarded straight to flutter. --flavor is
+	// first-class because Koolbase derives the artifact path from it; dart-defines
+	// are first-class because StringArray avoids the comma-split corruption a
+	// raw --dart-define would suffer. Everything else rides the '--' passthrough.
+	if buildFlavor != "" {
+		flutterArgs = append(flutterArgs, "--flavor", buildFlavor)
+	}
+	for _, d := range buildDartDefines {
+		flutterArgs = append(flutterArgs, "--dart-define="+d)
+	}
+	for _, f := range buildDartDefineFromFiles {
+		flutterArgs = append(flutterArgs, "--dart-define-from-file="+f)
+	}
+	flutterArgs = append(flutterArgs, passthrough...)
 
 	fmt.Printf("Building %s with Koolbase engine %s\n", platform, version)
 	fmt.Printf("  Flutter SDK: %s (%s)\n", flutterBin, sdkSource)
 	fmt.Printf("  flutter %s\n\n", strings.Join(flutterArgs, " "))
 
+	projectDir, _ := os.Getwd()
+
+	// Tee flutter's stdout so the real (flavor-shaped) artifact path is read from
+	// flutter's own "✓ Built <path>" line rather than a hardcoded literal.
+	var buildOut bytes.Buffer
 	build := exec.Command(flutterBin, flutterArgs...)
-	build.Stdout = os.Stdout
+	build.Stdout = io.MultiWriter(os.Stdout, &buildOut)
 	build.Stderr = os.Stderr
 	build.Stdin = os.Stdin
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("flutter build failed: %w", err)
 	}
 
+	artifactPath, rerr := resolveBuiltArtifact(buildOut.String(), projectDir, flutterSubcmd, buildFlavor, buildRelease)
+	if rerr != nil {
+		return rerr
+	}
+
 	if platform == "android" {
-		projectDir, _ := os.Getwd()
-		apkPath := filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", "app-release.apk")
 		fmt.Println("\n  Stamping build_id...")
-		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, apkPath, androidABIDir(buildTargetArch))
+		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, artifactPath, androidABIDir(buildTargetArch))
 		if serr != nil {
 			return fmt.Errorf("stamp build_id: %w", serr)
 		}
 		fmt.Printf("  \u2713 build_id %s\n", buildID)
 		if changed {
 			fmt.Println("  Bundling build_id asset (one rebuild)...")
+			// The rebuild replays the FULL flag set (flavor + defines + passthrough),
+			// so the bundled artifact differs only by the added asset.
 			rebuild := exec.Command(flutterBin, flutterArgs...)
 			rebuild.Stdout = os.Stdout
 			rebuild.Stderr = os.Stderr
@@ -188,25 +233,148 @@ func runBuild(cmd *cobra.Command, args []string) error {
 			if rerr := rebuild.Run(); rerr != nil {
 				return fmt.Errorf("rebuild after stamp failed: %w", rerr)
 			}
-			// build_id is stable across asset-only changes (verified), so no re-stamp.
+			// build_id is stable across asset-only changes (verified) and the
+			// output path is unchanged, so artifactPath still points at it.
 		}
 	}
+
+	artType := "apk"
+	abiTag := buildTargetArch
+	if platform == "macos" {
+		artType = "app"
+		abiTag = hostArch()
+	}
+	// Structured, machine-readable line consumed by `koolbase release` across the
+	// subprocess boundary. path= is intentionally last so values containing
+	// spaces survive a simple "everything after path=" parse.
+	fmt.Printf("KOOLBASE_ARTIFACT type=%s abi=%s path=%s\n", artType, abiTag, artifactPath)
 
 	fmt.Println("\n\u2713 Build complete. This binary supports Koolbase Code Push.")
 	return nil
 }
 
-// resolveFlutterBin returns the path to the flutter binary to use, plus a short
-// human-readable description of where it came from. engineVersion is used only
-// to render helpful guidance (e.g. "3.22.3" from "3.22.3-koolbase.1").
-//
-// Resolution order: --flutter-sdk flag, then saved config, then PATH. When
-// falling back to PATH, a caveat is printed because PATH flutter is very likely
-// the developer's day-to-day SDK, which usually won't match the engine version.
+// oneArgBeforeDash validates that exactly one positional arg (the platform)
+// precedes any '--' passthrough, so `koolbase build android -- --flag` parses
+// the platform correctly while everything after '--' is forwarded untouched.
+// Shared by `build` and `release`.
+func oneArgBeforeDash(cmd *cobra.Command, args []string) error {
+	n := cmd.ArgsLenAtDash()
+	if n < 0 {
+		n = len(args)
+	}
+	if n != 1 {
+		return fmt.Errorf("expected exactly one platform argument before any '--' passthrough")
+	}
+	return nil
+}
+
+// builtArtifactRe extracts the artifact path from flutter's "✓ Built <path>"
+// summary line, e.g. "✓ Built build/app/outputs/flutter-apk/app-prod-release.apk (8.4MB)".
+// Anchoring on the known extension makes it robust to the optional trailing size
+// (and its trailing period) and to wording drift across Flutter versions.
+var builtArtifactRe = regexp.MustCompile(`(?m)✓\s+Built\s+(\S.*?\.(?:apk|aab|app|ipa))\b`)
+
+// resolveBuiltArtifact returns the absolute path of the artifact flutter just
+// produced. The source of truth is flutter's own "✓ Built <path>" line (captured
+// from stdout) so the flavor-shaped output path is never hardcoded. If that line
+// can't be parsed, it falls back to the conventional path for (subcmd, flavor,
+// mode) and finally to a glob.
+func resolveBuiltArtifact(stdout, projectDir, subcmd, flavor string, release bool) (string, error) {
+	// 1. Flutter's reported path (last match wins — covers the post-stamp rebuild).
+	if ms := builtArtifactRe.FindAllStringSubmatch(stdout, -1); len(ms) > 0 {
+		p := strings.TrimSpace(ms[len(ms)-1][1])
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(projectDir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	// 2. Conventional path for this (subcmd, flavor, mode).
+	if conv := conventionalArtifactPath(projectDir, subcmd, flavor, release); conv != "" {
+		if _, err := os.Stat(conv); err == nil {
+			return conv, nil
+		}
+	}
+	// 3. Glob fallback.
+	if g := globArtifact(projectDir, subcmd, flavor, release); g != "" {
+		return g, nil
+	}
+	return "", fmt.Errorf("could not locate the built %s artifact: no parseable '✓ Built' line and nothing at the conventional path", subcmd)
+}
+
+// conventionalArtifactPath returns flutter's documented output path for a given
+// build subcommand, flavor and mode. "" when there is no stable convention
+// (macos product names vary — the glob handles those).
+func conventionalArtifactPath(projectDir, subcmd, flavor string, release bool) string {
+	mode := "release"
+	if !release {
+		mode = "debug"
+	}
+	switch subcmd {
+	case "apk":
+		name := "app-" + mode + ".apk"
+		if flavor != "" {
+			name = "app-" + flavor + "-" + mode + ".apk"
+		}
+		return filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", name)
+	case "appbundle":
+		variant := mode
+		name := "app-" + mode + ".aab"
+		if flavor != "" {
+			capMode := strings.ToUpper(mode[:1]) + mode[1:]
+			variant = flavor + capMode // e.g. prodRelease
+			name = "app-" + flavor + "-" + mode + ".aab"
+		}
+		return filepath.Join(projectDir, "build", "app", "outputs", "bundle", variant, name)
+	default:
+		return ""
+	}
+}
+
+// globArtifact is the last-resort locator: it globs the output dir and prefers a
+// file matching the (flavor, mode) prefix, falling back to a sole match.
+func globArtifact(projectDir, subcmd, flavor string, release bool) string {
+	var pattern string
+	switch subcmd {
+	case "apk":
+		pattern = filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", "app-*.apk")
+	case "appbundle":
+		pattern = filepath.Join(projectDir, "build", "app", "outputs", "bundle", "*", "app-*.aab")
+	case "macos":
+		pattern = filepath.Join(projectDir, "build", "macos", "Build", "Products", "Release", "*.app")
+	default:
+		return ""
+	}
+	matches, _ := filepath.Glob(pattern)
+	if len(matches) == 0 {
+		return ""
+	}
+	if subcmd == "macos" {
+		return matches[0]
+	}
+	mode := "release"
+	if !release {
+		mode = "debug"
+	}
+	want := "app-" + mode
+	if flavor != "" {
+		want = "app-" + flavor + "-" + mode
+	}
+	for _, m := range matches {
+		if strings.HasPrefix(filepath.Base(m), want) {
+			return m
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	return ""
+}
+
 // baseFlutterVersion strips the Koolbase engine suffix "-koolbase.<rev>" from an
-// engine version, yielding the underlying Flutter version. Handles any revision,
-// e.g. "3.44.0-koolbase.2" -> "3.44.0", "3.32.0-koolbase.1" -> "3.32.0". A version
-// with no suffix is returned unchanged.
+// engine version, yielding the underlying Flutter version. A version with no
+// suffix is returned unchanged.
 func baseFlutterVersion(engineVersion string) string {
 	if i := strings.Index(engineVersion, "-koolbase."); i >= 0 {
 		return engineVersion[:i]
@@ -214,6 +382,9 @@ func baseFlutterVersion(engineVersion string) string {
 	return engineVersion
 }
 
+// resolveFlutterBin returns the path to the flutter binary to use, plus a short
+// description of where it came from. Resolution order: --flutter-sdk flag, saved
+// config, then PATH (with a mismatch caveat printed).
 func resolveFlutterBin(engineVersion string) (bin string, source string, err error) {
 	flutterVersion := baseFlutterVersion(engineVersion)
 
@@ -256,13 +427,10 @@ func resolveFlutterBin(engineVersion string) (bin string, source string, err err
 var flutterVersionRe = regexp.MustCompile(`Flutter\s+(\d+\.\d+\.\d+)`)
 
 // verifyFlutterVersion runs `flutterBin --version` and confirms it matches the
-// engine's required Flutter version (e.g. "3.44.0"). Returns a clear, actionable
-// error on mismatch so a wrong SDK fails FAST and legibly instead of deep inside
-// the Dart front-end with a cryptic language-version error minutes later.
+// engine's required Flutter version, failing FAST and legibly on mismatch.
 func verifyFlutterVersion(flutterBin, wantVersion string) error {
 	out, err := exec.Command(flutterBin, "--version").CombinedOutput()
 	if err != nil {
-		// Don't hard-fail on a flaky --version invocation; warn and proceed.
 		fmt.Printf("⚠ Could not run 'flutter --version' to verify SDK version: %v\n"+
 			"  Proceeding, but the SDK MUST be Flutter %s.\n\n", err, wantVersion)
 		return nil
@@ -294,7 +462,6 @@ func flutterBinFromSDK(sdkRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Accept either the SDK root (…/flutter) or a direct path to bin/flutter.
 	candidate := expanded
 	if filepath.Base(expanded) != "flutter" || isDir(expanded) {
 		candidate = filepath.Join(expanded, "bin", "flutter")
@@ -324,11 +491,8 @@ func isDir(p string) bool {
 	return err == nil && info.IsDir()
 }
 
-// resolveProjectEngine detects the Flutter version for the current project and
-// maps it to an installed Koolbase engine version string. For now it inspects
-// installed engines and, if exactly one is installed, uses it; otherwise it
-// asks the user to pass --engine. A future version will parse the project's
-// Flutter version from `flutter --version` and match automatically.
+// resolveProjectEngine maps the current project to an installed Koolbase engine.
+// For now: if exactly one engine is installed, use it; otherwise require --engine.
 func resolveProjectEngine() (string, error) {
 	installed, err := engine.ListInstalled()
 	if err != nil {
@@ -347,7 +511,10 @@ func resolveProjectEngine() (string, error) {
 func init() {
 	buildCmd.Flags().BoolVar(&buildRelease, "release", false, "Build in release mode")
 	buildCmd.Flags().StringVar(&buildVersion, "engine", "", "Engine version to use (e.g. 3.22.3-koolbase.1)")
-	buildCmd.Flags().StringVar(&buildFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK (e.g. ~/flutter-3.22.3)")
+	buildCmd.Flags().StringVar(&buildFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK (e.g. ~/flutter-3.44.0)")
 	buildCmd.Flags().BoolVar(&buildNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking (keeps all icon glyphs; larger bundle)")
 	buildCmd.Flags().StringVar(&buildTargetArch, "target-arch", "arm64", "Android target ABI: arm64 (arm64-v8a, default) or arm (armeabi-v7a)")
+	buildCmd.Flags().StringVar(&buildFlavor, "flavor", "", "Build flavor (e.g. prod); selects the gradle product flavor and renames outputs to app-<flavor>-release.*")
+	buildCmd.Flags().StringArrayVar(&buildDartDefines, "dart-define", nil, "Dart environment value as KEY=VALUE (repeatable; values may contain commas, URLs, JSON)")
+	buildCmd.Flags().StringArrayVar(&buildDartDefineFromFiles, "dart-define-from-file", nil, "Load --dart-define values from a JSON or .env file (repeatable)")
 }
