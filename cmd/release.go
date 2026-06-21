@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
@@ -16,12 +18,15 @@ import (
 )
 
 var (
-	releaseEngine      string
-	releaseFlutterSDK  string
-	releaseArchs       []string
-	releaseNoTreeShake bool
-	releaseProject     string
-	releaseChannel     string
+	releaseEngine              string
+	releaseFlutterSDK          string
+	releaseArchs               []string
+	releaseNoTreeShake         bool
+	releaseProject             string
+	releaseChannel             string
+	releaseFlavor              string
+	releaseDartDefines         []string
+	releaseDartDefineFromFiles []string
 )
 
 // koolbaseBuildIDAsset is the AAB path of the stamped build_id asset. In a
@@ -29,7 +34,7 @@ var (
 const koolbaseBuildIDAsset = "base/assets/flutter_assets/assets/koolbase_build_id"
 
 var releaseCmd = &cobra.Command{
-	Use:   "release [platform]",
+	Use:   "release [platform] [-- <flutter flags>]",
 	Short: "Build a shippable multi-ABI app bundle (AAB) with Koolbase Code Push",
 	Long: `Assemble a single Android App Bundle (.aab) that carries the Koolbase
 engine for every target ABI — the format new Google Play apps require.
@@ -38,10 +43,17 @@ Unlike 'koolbase build' (a single-ABI APK for local testing), 'release' builds
 each ABI, stamps a per-ABI build_id map, and merges them into one .aab you
 upload to Play (Play re-signs it).
 
+Flavor, dart-defines and any other flutter flags are forwarded the same way as
+'koolbase build' — --flavor / --dart-define / --dart-define-from-file are
+first-class, everything else goes after a '--' separator:
+
+  koolbase release android --flavor prod -- --build-name=1.2.3 --obfuscate --split-debug-info=build/symbols
+
 Examples:
   koolbase release android --engine 3.44.0-koolbase.2 --flutter-sdk ~/flutter-3.44.0
-  koolbase release android --target-archs arm64,arm`,
-	Args: cobra.ExactArgs(1),
+  koolbase release android --target-archs arm64,arm --flavor prod
+  koolbase release android --flavor prod --dart-define API_URL=https://api.example.com`,
+	Args: oneArgBeforeDash,
 	RunE: runRelease,
 }
 
@@ -52,6 +64,12 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 	if len(releaseArchs) == 0 {
 		return fmt.Errorf("no target ABIs — pass --target-archs (e.g. arm64,arm)")
+	}
+
+	// Everything after '--' is forwarded to flutter verbatim.
+	var passthrough []string
+	if d := cmd.ArgsLenAtDash(); d >= 0 {
+		passthrough = append(passthrough, args[d:]...)
 	}
 
 	version := releaseEngine
@@ -89,6 +107,9 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	defer os.RemoveAll(work)
 
 	fmt.Printf("Koolbase release: engine %s, ABIs %s\n", version, strings.Join(releaseArchs, ", "))
+	if releaseFlavor != "" {
+		fmt.Printf("  Flavor: %s\n", releaseFlavor)
+	}
 	fmt.Printf("  Flutter SDK: %s (%s)\n\n", flutterBin, sdkSource)
 
 	type abiArtifact struct {
@@ -100,7 +121,8 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	var arts []abiArtifact
 
 	// 1. Build each ABI via the proven 'koolbase build android' path, then
-	//    capture its stamped build_id and native libs.
+	//    capture its stamped build_id and native libs. The inner build forwards
+	//    flavor + defines + the FULL passthrough.
 	for _, arch := range releaseArchs {
 		fmt.Printf("=== building ABI: %s ===\n", arch)
 		// Clean between ABIs so no prior-ABI artifacts leak into the APK.
@@ -115,8 +137,27 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		if releaseNoTreeShake {
 			buildArgs = append(buildArgs, "--no-tree-shake-icons")
 		}
+		if releaseFlavor != "" {
+			buildArgs = append(buildArgs, "--flavor", releaseFlavor)
+		}
+		for _, d := range releaseDartDefines {
+			buildArgs = append(buildArgs, "--dart-define="+d)
+		}
+		for _, f := range releaseDartDefineFromFiles {
+			buildArgs = append(buildArgs, "--dart-define-from-file="+f)
+		}
+		// Inner builds carry the full passthrough verbatim (obfuscate,
+		// split-debug-info, target, …). Re-insert '--' so the inner koolbase
+		// command treats them as passthrough, not as its own flags.
+		if len(passthrough) > 0 {
+			buildArgs = append(buildArgs, "--")
+			buildArgs = append(buildArgs, passthrough...)
+		}
+
+		var bout bytes.Buffer
 		b := exec.Command(self, buildArgs...)
-		b.Stdout, b.Stderr, b.Stdin = os.Stdout, os.Stderr, os.Stdin
+		b.Stdout = io.MultiWriter(os.Stdout, &bout)
+		b.Stderr, b.Stdin = os.Stderr, os.Stdin
 		if err := b.Run(); err != nil {
 			return fmt.Errorf("build ABI %s failed: %w", arch, err)
 		}
@@ -129,7 +170,13 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		}
 		buildID := strings.TrimSpace(string(raw))
 
-		apk := filepath.Join(projectDir, "build", "app", "outputs", "flutter-apk", "app-release.apk")
+		// APK path comes from the build's own KOOLBASE_ARTIFACT line, not a
+		// hardcoded literal — so it's correct under any --flavor.
+		apk, perr := parseKoolbaseArtifact(bout.String())
+		if perr != nil {
+			return fmt.Errorf("locate built APK for %s: %w", arch, perr)
+		}
+
 		libDir := filepath.Join(work, abiDir)
 		if err := os.MkdirAll(libDir, 0o755); err != nil {
 			return err
@@ -144,6 +191,12 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	// 2. Stock app-bundle SHELL at the matching Flutter version: supplies the
 	//    AAB structure (dex, manifest, assets, manifest-registered build_id
 	//    asset). Its native libs get swapped for the Koolbase ones below.
+	//
+	//    The shell carries --flavor (drives the gradle variant + AAB path) and
+	//    the passthrough MINUS {--obfuscate, --split-debug-info}: the shell's
+	//    libapp is discarded, so it never needs obfuscating, and an obfuscated
+	//    shell would overwrite the REAL per-ABI symbol maps. It does NOT carry
+	//    dart-defines (they only shape the discarded libapp, nothing that ships).
 	tps := make([]string, 0, len(arts))
 	for _, a := range arts {
 		if a.arch == "arm" || a.arch == "armeabi-v7a" {
@@ -154,19 +207,32 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("=== building app bundle shell ===")
 	shellArgs := []string{"build", "appbundle", "--release", "--target-platform=" + strings.Join(tps, ",")}
+	if releaseFlavor != "" {
+		shellArgs = append(shellArgs, "--flavor", releaseFlavor)
+	}
+	shellArgs = append(shellArgs, stripShellDenylist(passthrough)...)
+
+	var shellOut bytes.Buffer
 	sh := exec.Command(flutterBin, shellArgs...)
-	sh.Stdout, sh.Stderr, sh.Stdin = os.Stdout, os.Stderr, os.Stdin
+	sh.Stdout = io.MultiWriter(os.Stdout, &shellOut)
+	sh.Stderr, sh.Stdin = os.Stderr, os.Stdin
 	if err := sh.Run(); err != nil {
 		return fmt.Errorf("app bundle shell build failed: %w", err)
 	}
-	shellAAB := filepath.Join(projectDir, "build", "app", "outputs", "bundle", "release", "app-release.aab")
+	// Shell AAB path from flutter's own "✓ Built" line, not a hardcoded literal.
+	shellAAB, serr := resolveBuiltArtifact(shellOut.String(), projectDir, "appbundle", releaseFlavor, true)
+	if serr != nil {
+		return serr
+	}
 
 	// 3. Assemble: swap Koolbase libs + write the per-ABI build_id map.
 	outDir := filepath.Join(projectDir, "build", "app", "outputs", "koolbase")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	outAAB := filepath.Join(outDir, "app-release.aab")
+	// Mirror the shell's (flavor-shaped) filename so flavored releases don't
+	// collide, e.g. app-prod-release.aab.
+	outAAB := filepath.Join(outDir, filepath.Base(shellAAB))
 
 	buildIDMap := make(map[string]string, len(arts))
 	libSwaps := make(map[string]string)
@@ -190,8 +256,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Register a build_id release per ABI so the resolver can serve patches to
-	// each ABI's devices. build_id mode: each ABI build_id is its own release;
-	// app_version groups them. CreateRelease is idempotent server-side.
+	// each ABI's devices. CreateRelease is idempotent server-side.
 	cfg, cerr := config.Load()
 	projectID := releaseProject
 	if cerr == nil && projectID == "" {
@@ -229,6 +294,50 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("\n  Upload this .aab to Google Play (Play re-signs it).")
 	return nil
+}
+
+// parseKoolbaseArtifact pulls the artifact path out of the structured
+// "KOOLBASE_ARTIFACT type=… abi=… path=…" line a `koolbase build` subprocess
+// emits. path= is last on the line, so the path may contain spaces. Last match
+// wins (a build may emit one line per invocation).
+var koolbaseArtifactRe = regexp.MustCompile(`(?m)^KOOLBASE_ARTIFACT\b.*?\bpath=(.+?)\s*$`)
+
+func parseKoolbaseArtifact(stdout string) (string, error) {
+	ms := koolbaseArtifactRe.FindAllStringSubmatch(stdout, -1)
+	if len(ms) == 0 {
+		return "", fmt.Errorf("no KOOLBASE_ARTIFACT line in build output")
+	}
+	return strings.TrimSpace(ms[len(ms)-1][1]), nil
+}
+
+// stripShellDenylist removes --obfuscate and --split-debug-info (both joined and
+// space-separated forms, value token included) from a passthrough slice bound for
+// the app-bundle shell. The shell's libapp.so is discarded, so it never needs
+// obfuscating — and an obfuscated shell would overwrite the REAL per-ABI symbol
+// maps in the shared --split-debug-info dir; dropping --split-debug-info means the
+// shell writes no maps, so the per-ABI ones survive untouched. flutter also errors
+// if --obfuscate is set without --split-debug-info, so they're dropped as a pair.
+// Everything else (--target, --build-name, --build-number, …) passes through.
+func stripShellDenylist(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--obfuscate" {
+			continue
+		}
+		if a == "--split-debug-info" {
+			// space-separated form: drop this flag AND its value token.
+			if i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		if strings.HasPrefix(a, "--split-debug-info=") {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // extractLibsFromAPK pulls lib/<abiDir>/libflutter.so and libapp.so from the
@@ -403,5 +512,8 @@ func init() {
 	releaseCmd.Flags().BoolVar(&releaseNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking")
 	releaseCmd.Flags().StringVar(&releaseProject, "project", "", "Koolbase project/app ID (defaults to saved config)")
 	releaseCmd.Flags().StringVar(&releaseChannel, "channel", "stable", "Release channel for the registered releases")
+	releaseCmd.Flags().StringVar(&releaseFlavor, "flavor", "", "Build flavor (e.g. prod); selects the gradle product flavor and shapes output paths")
+	releaseCmd.Flags().StringArrayVar(&releaseDartDefines, "dart-define", nil, "Dart environment value as KEY=VALUE (repeatable)")
+	releaseCmd.Flags().StringArrayVar(&releaseDartDefineFromFiles, "dart-define-from-file", nil, "Load --dart-define values from a JSON or .env file (repeatable)")
 	rootCmd.AddCommand(releaseCmd)
 }
