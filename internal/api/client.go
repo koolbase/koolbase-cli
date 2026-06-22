@@ -138,12 +138,12 @@ type Function struct {
 }
 
 type DeployRequest struct {
-			Name         string  `json:"name"`
-			Code         string  `json:"code"`
-			Runtime      string  `json:"runtime"`
-			TimeoutMs    int     `json:"timeout_ms"`
-			Pubspec      *string `json:"pubspec,omitempty"`
-			RequiresAuth *bool   `json:"requires_auth,omitempty"`
+	Name         string  `json:"name"`
+	Code         string  `json:"code"`
+	Runtime      string  `json:"runtime"`
+	TimeoutMs    int     `json:"timeout_ms"`
+	Pubspec      *string `json:"pubspec,omitempty"`
+	RequiresAuth *bool   `json:"requires_auth,omitempty"`
 }
 
 func (c *Client) DeployFunction(projectID string, req DeployRequest) (*Function, error) {
@@ -157,7 +157,9 @@ func (c *Client) DeployFunction(projectID string, req DeployRequest) (*Function,
 		return nil, err
 	}
 	if status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("deploy failed: %s", errResp.Error)
 	}
@@ -173,7 +175,7 @@ func (c *Client) ListFunctions(projectID string) ([]Function, error) {
 		return nil, fmt.Errorf("failed to list functions: %s", string(data))
 	}
 
-var fns []Function
+	var fns []Function
 	if err := json.Unmarshal(data, &fns); err != nil {
 		return nil, err
 	}
@@ -287,7 +289,9 @@ func (c *Client) CreateCron(projectID, functionName, cronExpression string) (*Cr
 		return nil, err
 	}
 	if status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("failed to create cron: %s", errResp.Error)
 	}
@@ -317,7 +321,9 @@ func (c *Client) UpdateCron(projectID, cronID string, enabled bool) (*CronSchedu
 		return nil, err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("failed to update cron: %s", errResp.Error)
 	}
@@ -364,7 +370,9 @@ func (c *Client) CreateBundle(appID string, req CreateBundleRequest) (*Bundle, e
 		return nil, err
 	}
 	if status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("failed to create bundle: %s", errResp.Error)
 	}
@@ -416,7 +424,9 @@ func (c *Client) PublishBundle(appID, bundleID string) error {
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("publish failed: %s", errResp.Error)
 	}
@@ -429,7 +439,9 @@ func (c *Client) RecallBundle(appID, bundleID string) error {
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("recall failed: %s", errResp.Error)
 	}
@@ -462,7 +474,9 @@ func (c *Client) UpdateBundleChecksum(appID, bundleID, checksum string, sizeByte
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("checksum update failed: %s", errResp.Error)
 	}
@@ -477,7 +491,9 @@ func (c *Client) SetBundleMandatory(appID, bundleID string, mandatory bool) erro
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("failed to update mandatory flag: %s", errResp.Error)
 	}
@@ -487,15 +503,16 @@ func (c *Client) SetBundleMandatory(appID, bundleID string, mandatory bool) erro
 // ─── Code Push (System B: Releases + Patches) ───────────────────────────────
 
 type Release struct {
-	ID             string `json:"release_id"`
-	AppID          string `json:"app_id"`
-	BuildID        string `json:"build_id"`
-	FlutterVersion string `json:"flutter_version"`
-	Platform       string `json:"platform"`
-	AppVersion     string `json:"app_version"`
-	Channel        string `json:"channel"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      string `json:"created_at"`
+	ID             string          `json:"release_id"`
+	AppID          string          `json:"app_id"`
+	BuildID        string          `json:"build_id"`
+	FlutterVersion string          `json:"flutter_version"`
+	Platform       string          `json:"platform"`
+	AppVersion     string          `json:"app_version"`
+	Channel        string          `json:"channel"`
+	BuildConfig    json.RawMessage `json:"build_config,omitempty"`
+	CreatedBy      string          `json:"created_by"`
+	CreatedAt      string          `json:"created_at"`
 }
 
 type Patch struct {
@@ -518,12 +535,13 @@ type Patch struct {
 }
 
 type CreateReleaseRequest struct {
-	BuildID        string `json:"build_id"`
-	FlutterVersion string `json:"flutter_version"`
-	Platform       string `json:"platform"`
-	AppVersion     string `json:"app_version"`
-	MatchMode      string `json:"match_mode"`
-	Channel        string `json:"channel"`
+	BuildID        string          `json:"build_id"`
+	FlutterVersion string          `json:"flutter_version"`
+	Platform       string          `json:"platform"`
+	AppVersion     string          `json:"app_version"`
+	MatchMode      string          `json:"match_mode"`
+	Channel        string          `json:"channel"`
+	BuildConfig    json.RawMessage `json:"build_config,omitempty"`
 }
 
 type CreatePatchRequest struct {
@@ -542,7 +560,9 @@ func (c *Client) CreateRelease(appID string, req CreateReleaseRequest) (*Release
 		return nil, err
 	}
 	if status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("failed to create release: %s", errResp.Error)
 	}
@@ -577,7 +597,9 @@ func (c *Client) CreatePatch(appID, releaseID string, req CreatePatchRequest) (*
 		return nil, err
 	}
 	if status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return nil, fmt.Errorf("failed to create patch: %s", errResp.Error)
 	}
@@ -650,7 +672,9 @@ func (c *Client) PublishPatch(appID, patchID string) error {
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("publish failed: %s", errResp.Error)
 	}
@@ -663,7 +687,9 @@ func (c *Client) RecallPatch(appID, patchID string) error {
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("recall failed: %s", errResp.Error)
 	}
@@ -748,7 +774,9 @@ func (c *Client) UpsertSecret(projectID, name, value string) error {
 		return err
 	}
 	if status != 200 && status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		return fmt.Errorf("failed to save secret: %s", errResp.Error)
 	}
@@ -817,7 +845,9 @@ func (c *Client) ReplayDeadLetter(projectID, id string) error {
 		return err
 	}
 	if status != 200 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		if errResp.Error != "" {
 			return fmt.Errorf("failed to replay dead letter: %s", errResp.Error)
@@ -890,7 +920,9 @@ func (c *Client) CreateTrigger(projectID, functionName, eventType, collection st
 		return nil, err
 	}
 	if status != 200 && status != 201 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		if errResp.Error != "" {
 			return nil, fmt.Errorf("failed to create trigger: %s", errResp.Error)
@@ -916,7 +948,9 @@ func (c *Client) DeleteTrigger(projectID, triggerID string) error {
 		return err
 	}
 	if status != 200 && status != 204 {
-		var errResp struct{ Error string `json:"error"` }
+		var errResp struct {
+			Error string `json:"error"`
+		}
 		json.Unmarshal(data, &errResp)
 		if errResp.Error != "" {
 			return fmt.Errorf("failed to delete trigger: %s", errResp.Error)

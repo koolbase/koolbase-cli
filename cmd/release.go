@@ -268,6 +268,8 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	} else {
 		appVersion := readPubspecVersion(projectDir)
 		apiClient := api.NewClient(cfg.BaseURL, cfg.APIKey)
+		// Same fingerprint for every ABI (identical flag set); computed once.
+		buildConfig := buildFingerprint(releaseFlavor, releaseDartDefines, releaseDartDefineFromFiles, passthrough)
 		fmt.Println("\n=== registering releases ===")
 		for _, a := range arts {
 			rel, rerr := apiClient.CreateRelease(projectID, api.CreateReleaseRequest{
@@ -277,6 +279,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 				AppVersion:     appVersion,
 				MatchMode:      "build_id",
 				Channel:        releaseChannel,
+				BuildConfig:    buildConfig,
 			})
 			if rerr != nil {
 				return fmt.Errorf("register release for %s (build_id %s): %w", a.abiDir, a.buildID, rerr)

@@ -141,8 +141,11 @@ var patchPushCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+			var matched *api.Release
 			for _, r := range releases {
 				if r.BuildID == buildID && r.Channel == channel && r.Platform == platform {
+					rr := r
+					matched = &rr
 					releaseID = r.ID
 					break
 				}
@@ -163,6 +166,7 @@ var patchPushCmd = &cobra.Command{
 				fmt.Printf("  ✓ release created → %s\n", releaseID)
 			} else {
 				fmt.Printf("  ✓ release matched → %s\n", releaseID)
+				printReleaseFlagParity(matched)
 			}
 		}
 
