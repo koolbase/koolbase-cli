@@ -250,7 +250,12 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("assemble AAB: %w", err)
 	}
 
+	if serr := signReleaseAAB(outAAB, projectDir); serr != nil {
+		return fmt.Errorf("sign AAB: %w", serr)
+	}
+
 	fmt.Printf("\n\u2713 Release bundle ready: %s\n", outAAB)
+
 	for abi, bid := range buildIDMap {
 		fmt.Printf("    %-13s build_id %s\n", abi, bid)
 	}
@@ -474,6 +479,74 @@ func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, b
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// signReleaseAAB signs the merged AAB in place with the upload key from
+// android/key.properties — the same key gradle uses for the shell. The merge
+// step re-zips the bundle, which strips gradle's signature, so without this the
+// AAB uploads to Play as "unsigned".
+func signReleaseAAB(aabPath, projectDir string) error {
+	propsPath := filepath.Join(projectDir, "android", "key.properties")
+	data, rerr := os.ReadFile(propsPath)
+	if rerr != nil {
+		fmt.Println("\nWARNING: android/key.properties not found — the merged AAB is UNSIGNED.")
+		fmt.Println("  Sign it before uploading to Play, or add key.properties so release can sign it.")
+		return nil
+	}
+
+	props := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		props[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+	}
+
+	storeFile := props["storeFile"]
+	keyAlias := props["keyAlias"]
+	if storeFile == "" || keyAlias == "" {
+		return fmt.Errorf("key.properties missing storeFile or keyAlias")
+	}
+	if !filepath.IsAbs(storeFile) {
+		// gradle resolves storeFile via file() relative to the :app module dir.
+		storeFile = filepath.Join(projectDir, "android", "app", storeFile)
+	}
+	if _, serr := os.Stat(storeFile); serr != nil {
+		return fmt.Errorf("keystore not found at %s: %w", storeFile, serr)
+	}
+
+	jarsigner := "jarsigner"
+	if jh := os.Getenv("JAVA_HOME"); jh != "" {
+		cand := filepath.Join(jh, "bin", "jarsigner")
+		if _, serr := os.Stat(cand); serr == nil {
+			jarsigner = cand
+		}
+	}
+
+	// Pass passwords via env, not argv, so they don't appear in `ps`.
+	args := []string{"-keystore", storeFile, "-storepass:env", "KB_STOREPASS"}
+	env := append(os.Environ(), "KB_STOREPASS="+props["storePassword"])
+	if kp := props["keyPassword"]; kp != "" {
+		args = append(args, "-keypass:env", "KB_KEYPASS")
+		env = append(env, "KB_KEYPASS="+kp)
+	}
+	args = append(args, aabPath, keyAlias)
+
+	signCmd := exec.Command(jarsigner, args...)
+	signCmd.Env = env
+	if out, serr := signCmd.CombinedOutput(); serr != nil {
+		return fmt.Errorf("jarsigner failed: %w\n%s", serr, out)
+	}
+	if out, serr := exec.Command(jarsigner, "-verify", aabPath).CombinedOutput(); serr != nil {
+		return fmt.Errorf("jarsigner -verify failed: %w\n%s", serr, out)
+	}
+	fmt.Println("  \u2713 AAB signed with upload key")
+	return nil
 }
 
 func arts2dirs(m map[string]string) []string {
