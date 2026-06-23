@@ -23,6 +23,7 @@ var (
 	releaseArchs               []string
 	releaseNoTreeShake         bool
 	releaseProject             string
+	releaseNoRegister          bool
 	releaseChannel             string
 	releaseFlavor              string
 	releaseDartDefines         []string
@@ -283,8 +284,14 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		projectID = cfg.ProjectID
 	}
 	if cerr != nil || projectID == "" || cfg.APIKey == "" {
-		fmt.Println("\nWARNING: releases NOT registered (no --project and no saved login).")
-		fmt.Println("  Code Push cannot serve patches to these build_ids until registered.")
+		if !releaseNoRegister {
+			return fmt.Errorf("releases NOT registered (no --project and no saved login) — this AAB would be UNPATCHABLE.\n" +
+				"  Code Push cannot serve patches to these build_ids until they are registered.\n" +
+				"  Fix: run `koolbase login` and/or pass --project <id>, then rebuild.\n" +
+				"  If you intend an unregistered build (local testing / CI), pass --no-register to bypass this check.")
+		}
+		fmt.Println("\nWARNING: releases NOT registered (--no-register set).")
+		fmt.Println("  This AAB is UNPATCHABLE — Code Push cannot serve patches to these build_ids.")
 	} else {
 		appVersion := readPubspecVersion(projectDir)
 		apiClient := api.NewClient(cfg.BaseURL, cfg.APIKey)
@@ -602,6 +609,7 @@ func init() {
 	releaseCmd.Flags().StringSliceVar(&releaseArchs, "target-archs", []string{"arm64", "arm"}, "Target ABIs (comma-separated): arm64,arm")
 	releaseCmd.Flags().BoolVar(&releaseNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking")
 	releaseCmd.Flags().StringVar(&releaseProject, "project", "", "Koolbase project/app ID (defaults to saved config)")
+	releaseCmd.Flags().BoolVar(&releaseNoRegister, "no-register", false, "Build without registering build_ids (produces an UNPATCHABLE AAB; for local testing/CI only)")
 	releaseCmd.Flags().StringVar(&releaseChannel, "channel", "stable", "Release channel for the registered releases")
 	releaseCmd.Flags().StringVar(&releaseFlavor, "flavor", "", "Build flavor (e.g. prod); selects the gradle product flavor and shapes output paths")
 	releaseCmd.Flags().StringArrayVar(&releaseDartDefines, "dart-define", nil, "Dart environment value as KEY=VALUE (repeatable)")
