@@ -126,9 +126,24 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	for _, arch := range releaseArchs {
 		fmt.Printf("=== building ABI: %s ===\n", arch)
 		// Clean between ABIs so no prior-ABI artifacts leak into the APK.
+
 		clean := exec.Command(flutterBin, "clean")
 		clean.Stdout, clean.Stderr = os.Stdout, os.Stderr
 		_ = clean.Run()
+		// `flutter clean` wipes the generated assets/koolbase_build_id, which is
+		// declared in pubspec. The inner build stamps it with the real build_id,
+		// but flutter's asset bundler fails on the missing-but-declared asset
+		// before the stamp runs. Ensure an empty placeholder exists post-clean;
+		// the inner build overwrites it.
+		bidPlaceholder := filepath.Join(projectDir, "assets", "koolbase_build_id")
+		if err := os.MkdirAll(filepath.Dir(bidPlaceholder), 0o755); err != nil {
+			return fmt.Errorf("create assets dir for %s: %w", arch, err)
+		}
+		if _, statErr := os.Stat(bidPlaceholder); os.IsNotExist(statErr) {
+			if werr := os.WriteFile(bidPlaceholder, []byte(""), 0o644); werr != nil {
+				return fmt.Errorf("create koolbase_build_id placeholder for %s: %w", arch, werr)
+			}
+		}
 
 		buildArgs := []string{"build", "android", "--engine", version, "--target-arch", arch, "--release"}
 		if releaseFlutterSDK != "" {
