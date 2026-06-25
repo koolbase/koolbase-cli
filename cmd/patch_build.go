@@ -7,6 +7,8 @@ import (
 	"debug/macho"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +57,29 @@ func analyzeAppBinary(appPath string) (*appBinaryInfo, error) {
 	default:
 		return nil, fmt.Errorf("unrecognized binary format (not Mach-O or ELF): %s", appPath)
 	}
+}
+
+// downloadToTemp streams a URL (a presigned R2 GET) to a temp file and returns
+// its path. Caller is responsible for removing it.
+func downloadToTemp(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("download failed: status %d", resp.StatusCode)
+	}
+	f, err := os.CreateTemp(os.TempDir(), "kb_base_*.so")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // extractSnapshotBlobs returns the raw isolate data + instructions blobs from a
