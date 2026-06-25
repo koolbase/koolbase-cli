@@ -312,6 +312,26 @@ func runRelease(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("register release for %s (build_id %s): %w", a.abiDir, a.buildID, rerr)
 			}
 			fmt.Printf("  registered %s -> release %s (build_id %s, channel %s)\n", a.abiDir, rel.ID, a.buildID, releaseChannel)
+
+			// Upload the base libapp.so so patches can be pushed later WITHOUT
+			// manually extracting the base from the AAB. Non-fatal: if any step
+			// fails, the release is still registered and remains patchable the
+			// old way (patch push --binary <base>).
+			basePath := filepath.Join(a.libDir, "libapp.so")
+			up, uerr := apiClient.GetReleaseBaseUploadURL(projectID, rel.ID, a.abiDir)
+			if uerr != nil {
+				fmt.Printf("  ⚠ base upload skipped for %s (could not get upload url): %v\n", a.abiDir, uerr)
+				continue
+			}
+			if perr := apiClient.PutBaseArtifact(up.UploadURL, basePath); perr != nil {
+				fmt.Printf("  ⚠ base upload failed for %s: %v\n", a.abiDir, perr)
+				continue
+			}
+			if cerr := apiClient.ConfirmReleaseBase(projectID, rel.ID, up.StorageKey); cerr != nil {
+				fmt.Printf("  ⚠ base upload not recorded for %s: %v\n", a.abiDir, cerr)
+				continue
+			}
+			fmt.Printf("  ✓ base stored for %s (patch push won't need --binary)\n", a.abiDir)
 		}
 	}
 	if len(extraAbis) > 0 {
