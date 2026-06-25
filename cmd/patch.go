@@ -63,9 +63,33 @@ var patchPushCmd = &cobra.Command{
 		if appID == "" {
 			return fmt.Errorf("--app is required")
 		}
+
+		// If --binary is omitted, fetch the release's stored base from the
+		// server (uploaded at `koolbase release` time). This removes the need
+		// to manually extract libapp.so from the AAB. Resolution requires
+		// --release (the explicit release whose base we fetch).
 		if binary == "" {
-			return fmt.Errorf("--binary is required (the released/base App binary)")
+			if releaseID == "" {
+				return fmt.Errorf("--binary is required, OR pass --release <id> to use the base stored at release time")
+			}
+			fetchClient := api.NewClient(cfg.BaseURL, cfg.APIKey)
+			dl, derr := fetchClient.GetReleaseBaseDownloadURL(appID, releaseID)
+			if derr != nil {
+				return fmt.Errorf("could not get stored base: %w", derr)
+			}
+			if dl == nil {
+				return fmt.Errorf("release %s has no stored base — pass --binary <base> (this release predates base retention)", releaseID)
+			}
+			fmt.Println("  Fetching stored base binary...")
+			fetched, ferr := downloadToTemp(dl.DownloadURL)
+			if ferr != nil {
+				return fmt.Errorf("could not download stored base: %w", ferr)
+			}
+			defer os.Remove(fetched)
+			binary = fetched
+			fmt.Printf("  ✓ stored base fetched (%d bytes)\n", dl.BaseArtifactSize)
 		}
+
 		asIdentity, _ := cmd.Flags().GetBool("identity")
 		if newBin == "" && !asIdentity {
 			return fmt.Errorf("--new is required (the recompiled App binary to ship)")
