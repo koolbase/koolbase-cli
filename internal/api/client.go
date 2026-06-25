@@ -1423,3 +1423,104 @@ func (c *Client) GetEngineDownload(flutterVersion, hostPlatform, hostArch, targe
 	}
 	return &out, nil
 }
+
+// BaseUploadURLResponse is returned by the base-upload-url endpoint.
+type BaseUploadURLResponse struct {
+	UploadURL  string `json:"upload_url"`
+	StorageKey string `json:"storage_key"`
+}
+
+// BaseDownloadURLResponse is returned by the base-download-url endpoint.
+type BaseDownloadURLResponse struct {
+	DownloadURL      string `json:"download_url"`
+	BaseArtifactKey  string `json:"base_artifact_key"`
+	BaseArtifactSize int64  `json:"base_artifact_size"`
+}
+
+// GetReleaseBaseUploadURL asks the server for a presigned PUT URL to upload a
+// release's base libapp.so for a given ABI.
+func (c *Client) GetReleaseBaseUploadURL(appID, releaseID, abi string) (*BaseUploadURLResponse, error) {
+	path := "/v1/apps/" + appID + "/releases/" + releaseID + "/base-upload-url?abi=" + abi
+	data, status, err := c.do(http.MethodPost, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("base upload url: unexpected status %d: %s", status, string(data))
+	}
+	var resp BaseUploadURLResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PutBaseArtifact uploads the base libapp.so directly to the presigned PUT URL
+// (R2), bypassing the API server. contentType must match what the presign was
+// generated with (application/octet-stream).
+func (c *Client) PutBaseArtifact(uploadURL, filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open base artifact: %w", err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat base artifact: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, uploadURL, f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = info.Size()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload base artifact: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload base artifact: status %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// ConfirmReleaseBase tells the server the base was uploaded at storageKey, so it
+// HEADs the object, records its size, and stores the reference on the release.
+func (c *Client) ConfirmReleaseBase(appID, releaseID, storageKey string) error {
+	path := "/v1/apps/" + appID + "/releases/" + releaseID + "/base-confirm"
+	data, status, err := c.do(http.MethodPost, path, map[string]string{"storage_key": storageKey})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("confirm base: unexpected status %d: %s", status, string(data))
+	}
+	return nil
+}
+
+// GetReleaseBaseDownloadURL asks the server for a presigned GET URL for a
+// release's stored base. Returns (nil, nil) when the server reports 404 (no
+// stored base) so the caller can fall back to requiring --binary.
+func (c *Client) GetReleaseBaseDownloadURL(appID, releaseID string) (*BaseDownloadURLResponse, error) {
+	path := "/v1/apps/" + appID + "/releases/" + releaseID + "/base-download-url"
+	data, status, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, nil // no stored base — caller falls back to --binary
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("base download url: unexpected status %d: %s", status, string(data))
+	}
+	var resp BaseDownloadURLResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
