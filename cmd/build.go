@@ -215,6 +215,17 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return rerr
 	}
 
+	// flutter_version is platform-agnostic and known up front (from --engine), so
+	// stamp it on EVERY build — the SDK reports it on patch-check so the resolver
+	// refuses a patch built on a different engine. Folded into the same single
+	// rebuild as build_id below when both change, so there is at most one rebuild.
+	fvChanged, fverr := stampFlutterVersionIntoAssets(projectDir, version)
+	if fverr != nil {
+		return fmt.Errorf("stamp flutter_version: %w", fverr)
+	}
+	fmt.Printf("  \u2713 flutter_version %s\n", baseFlutterVersion(version))
+
+	needRebuild := fvChanged
 	if platform == "android" {
 		fmt.Println("\n  Stamping build_id...")
 		buildID, changed, serr := stampBuildIDIntoAssets(projectDir, artifactPath, androidABIDir(buildTargetArch))
@@ -222,20 +233,22 @@ func runBuild(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("stamp build_id: %w", serr)
 		}
 		fmt.Printf("  \u2713 build_id %s\n", buildID)
-		if changed {
-			fmt.Println("  Bundling build_id asset (one rebuild)...")
-			// The rebuild replays the FULL flag set (flavor + defines + passthrough),
-			// so the bundled artifact differs only by the added asset.
-			rebuild := exec.Command(flutterBin, flutterArgs...)
-			rebuild.Stdout = os.Stdout
-			rebuild.Stderr = os.Stderr
-			rebuild.Stdin = os.Stdin
-			if rerr := rebuild.Run(); rerr != nil {
-				return fmt.Errorf("rebuild after stamp failed: %w", rerr)
-			}
-			// build_id is stable across asset-only changes (verified) and the
-			// output path is unchanged, so artifactPath still points at it.
+		needRebuild = needRebuild || changed
+	}
+	if needRebuild {
+		fmt.Println("  Bundling Koolbase assets (one rebuild)...")
+		// The rebuild replays the FULL flag set (flavor + defines + passthrough),
+		// so the bundled artifact differs only by the added asset(s).
+		rebuild := exec.Command(flutterBin, flutterArgs...)
+		rebuild.Stdout = os.Stdout
+		rebuild.Stderr = os.Stderr
+		rebuild.Stdin = os.Stdin
+		if rerr := rebuild.Run(); rerr != nil {
+			return fmt.Errorf("rebuild after stamp failed: %w", rerr)
 		}
+		// Both build_id and flutter_version are stable across asset-only changes
+		// (build_id verified on-device; flutter_version is a static string), and the
+		// output path is unchanged, so artifactPath still points at the artifact.
 	}
 
 	artType := "apk"

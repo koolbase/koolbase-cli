@@ -75,10 +75,41 @@ func stampBuildIDIntoAssets(projectDir, apkPath, abiDir string) (buildID string,
 		changed = true
 	}
 
-	if derr := ensurePubspecAsset(projectDir); derr != nil {
+	if derr := ensurePubspecAsset(projectDir, "koolbase_build_id"); derr != nil {
 		return "", false, derr
 	}
 	return buildID, changed, nil
+}
+
+// stampFlutterVersionIntoAssets writes the bare Flutter version (engine suffix
+// stripped, e.g. "3.32.8" from "3.32.8-koolbase.1") into
+// assets/koolbase_flutter_version so the SDK can report it on patch-check and the
+// resolver can refuse a patch built on a different engine. Unlike build_id this
+// value is known up front (from --engine) and is identical across ABIs, so it is
+// a bare string written directly — no binary analysis, no per-ABI map.
+//
+// Returns (changed, error). `changed` is true if the asset content was updated
+// (caller rebuilds once so it is bundled); false means it already held this value.
+func stampFlutterVersionIntoAssets(projectDir, engineVersion string) (changed bool, err error) {
+	flutterVersion := baseFlutterVersion(engineVersion)
+	assetsDir := filepath.Join(projectDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+		return false, fmt.Errorf("create assets dir: %w", err)
+	}
+	assetPath := filepath.Join(assetsDir, "koolbase_flutter_version")
+	if existing, rerr := os.ReadFile(assetPath); rerr == nil &&
+		strings.TrimSpace(string(existing)) == flutterVersion {
+		changed = false
+	} else {
+		if werr := os.WriteFile(assetPath, []byte(flutterVersion+"\n"), 0o644); werr != nil {
+			return false, fmt.Errorf("write flutter_version asset: %w", werr)
+		}
+		changed = true
+	}
+	if derr := ensurePubspecAsset(projectDir, "koolbase_flutter_version"); derr != nil {
+		return false, derr
+	}
+	return changed, nil
 }
 
 // extractLibappFromAPK pulls lib/<abiDir>/libapp.so out of the APK into a temp
@@ -128,16 +159,16 @@ func extractLibappFromAPK(apkPath, abiDir string) (string, func(), error) {
 	return tmp.Name(), cleanup, nil
 }
 
-// ensurePubspecAsset makes sure pubspec.yaml declares assets/koolbase_build_id
+// ensurePubspecAsset makes sure pubspec.yaml declares assets/<assetName>
 // under the flutter: section so the file is bundled. Idempotent.
-func ensurePubspecAsset(projectDir string) error {
+func ensurePubspecAsset(projectDir, assetName string) error {
 	p := filepath.Join(projectDir, "pubspec.yaml")
 	raw, err := os.ReadFile(p)
 	if err != nil {
 		return fmt.Errorf("read pubspec.yaml: %w", err)
 	}
 	s := string(raw)
-	if strings.Contains(s, "assets/koolbase_build_id") {
+	if strings.Contains(s, "assets/"+assetName) {
 		return nil // already declared
 	}
 
@@ -166,7 +197,7 @@ func ensurePubspecAsset(projectDir string) error {
 		if inFlutter && !addedBlock && strings.HasPrefix(trimmed, "assets:") &&
 			strings.HasPrefix(line, flutterIndent) {
 			out = append(out, line)
-			out = append(out, flutterIndent+"  - assets/koolbase_build_id")
+			out = append(out, flutterIndent+"  - assets/"+assetName)
 			insertedUnderExistingAssets = true
 			addedBlock = true
 			continue
@@ -177,7 +208,7 @@ func ensurePubspecAsset(projectDir string) error {
 		if inFlutter && !addedBlock && trimmed != "" && !strings.HasPrefix(line, " ") &&
 			!strings.HasPrefix(line, "flutter:") {
 			out = append(out, flutterIndent+"assets:")
-			out = append(out, flutterIndent+"  - assets/koolbase_build_id")
+			out = append(out, flutterIndent+"  - assets/"+assetName)
 			addedBlock = true
 			inFlutter = false
 			out = append(out, line)
@@ -190,7 +221,7 @@ func ensurePubspecAsset(projectDir string) error {
 	// flutter: was the last block and had no assets: — append one.
 	if inFlutter && !addedBlock {
 		out = append(out, flutterIndent+"assets:")
-		out = append(out, flutterIndent+"  - assets/koolbase_build_id")
+		out = append(out, flutterIndent+"  - assets/"+assetName)
 		addedBlock = true
 	}
 

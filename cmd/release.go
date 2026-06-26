@@ -34,6 +34,11 @@ var (
 // multi-ABI release we overwrite its content with a JSON map {abi: build_id}.
 const koolbaseBuildIDAsset = "base/assets/flutter_assets/assets/koolbase_build_id"
 
+// koolbaseFlutterVersionAsset is the AAB path of the stamped flutter_version
+// asset. Unlike build_id it is a bare string (identical across ABIs), written
+// authoritatively at assembly time from --engine.
+const koolbaseFlutterVersionAsset = "base/assets/flutter_assets/assets/koolbase_flutter_version"
+
 var releaseCmd = &cobra.Command{
 	Use:   "release [platform] [-- <flutter flags>]",
 	Short: "Build a shippable multi-ABI app bundle (AAB) with Koolbase Code Push",
@@ -143,6 +148,15 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		if _, statErr := os.Stat(bidPlaceholder); os.IsNotExist(statErr) {
 			if werr := os.WriteFile(bidPlaceholder, []byte(""), 0o644); werr != nil {
 				return fmt.Errorf("create koolbase_build_id placeholder for %s: %w", arch, werr)
+			}
+		}
+		// Same clean-race guard for the flutter_version asset: pubspec declares it
+		// (the inner build's ensurePubspecAsset), but flutter clean wipes the file.
+		// Seed the real value so the bundler does not fail; the inner build re-stamps it.
+		fvPlaceholder := filepath.Join(projectDir, "assets", "koolbase_flutter_version")
+		if _, statErr := os.Stat(fvPlaceholder); os.IsNotExist(statErr) {
+			if werr := os.WriteFile(fvPlaceholder, []byte(baseFlutterVersion(version)+"\n"), 0o644); werr != nil {
+				return fmt.Errorf("create koolbase_flutter_version placeholder for %s: %w", arch, werr)
 			}
 		}
 
@@ -261,7 +275,7 @@ func runRelease(cmd *cobra.Command, args []string) error {
 	}
 	mapJSON, _ := json.Marshal(buildIDMap)
 
-	extraAbis, err := assembleReleaseAAB(shellAAB, outAAB, libSwaps, string(mapJSON), engined)
+	extraAbis, err := assembleReleaseAAB(shellAAB, outAAB, libSwaps, string(mapJSON), baseFlutterVersion(version), engined)
 	if err != nil {
 		return fmt.Errorf("assemble AAB: %w", err)
 	}
@@ -440,7 +454,7 @@ func copyZipEntryToFile(f *zip.File, dest string) error {
 // META-INF (stale signature; Play re-signs) and writes no directory entries
 // (bundletool rejects them). Returns any non-engined ABI dirs found in the
 // bundle (e.g. x86_64 plugin libs) so the caller can warn.
-func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, buildIDMapJSON string, engined map[string]bool) ([]string, error) {
+func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, buildIDMapJSON, flutterVersion string, engined map[string]bool) ([]string, error) {
 	zr, err := zip.OpenReader(shellPath)
 	if err != nil {
 		return nil, err
@@ -465,6 +479,7 @@ func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, b
 	}
 
 	wroteMap := false
+	wroteFV := false
 	extra := map[string]bool{}
 	for _, f := range zr.File {
 		name := f.Name
@@ -486,6 +501,13 @@ func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, b
 				return nil, err
 			}
 			wroteMap = true
+			continue
+		}
+		if name == koolbaseFlutterVersionAsset {
+			if err := writeData(name, []byte(flutterVersion+"\n")); err != nil {
+				return nil, err
+			}
+			wroteFV = true
 			continue
 		}
 		if src, ok := libSwaps[name]; ok {
@@ -515,6 +537,13 @@ func assembleReleaseAAB(shellPath, outPath string, libSwaps map[string]string, b
 	}
 	if !wroteMap {
 		return nil, fmt.Errorf("koolbase_build_id asset not present in shell AAB — the per-ABI build must run stampBuildIDIntoAssets (it declares the asset)")
+	}
+	// flutter_version rides in from the inner builds; if an older shell AAB lacks
+	// it, inject so the AAB always carries the engine version for the resolver.
+	if !wroteFV {
+		if err := writeData(koolbaseFlutterVersionAsset, []byte(flutterVersion+"\n")); err != nil {
+			return nil, err
+		}
 	}
 	var out []string
 	for a := range extra {
