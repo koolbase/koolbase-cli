@@ -432,6 +432,12 @@ func init() {
 	patchStageLocalCmd.Flags().String("new", "", "Path to a recompiled App binary; present => kind=3 replacement")
 	patchStageLocalCmd.Flags().Bool("diff", false, "With --new: build a kind=4 DIFF patch (KBD1 delta) instead of kind=3 full")
 	patchStageLocalCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
+	patchIosCmd.Flags().String("bytecode", "", "Path to dart2bytecode output (required)")
+	patchIosCmd.Flags().String("keys", "", "Path to the key file from KOOLBASE_KEY_OUT (required)")
+	patchIosCmd.Flags().String("binary", "", "Path to base App binary (for build_id; required unless --raw)")
+	patchIosCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
+	patchIosCmd.Flags().Bool("stage-local", false, "Write staged.kbpatch to the VM handshake dir")
+	patchIosCmd.Flags().Bool("raw", false, "Emit bare KBPI (device-proven path) instead of signed KBPM")
 
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")
 	patchListCmd.Flags().String("release", "", "Release ID (required)")
@@ -444,6 +450,7 @@ func init() {
 
 	patchCmd.AddCommand(patchPushCmd)
 	patchCmd.AddCommand(patchStageLocalCmd)
+	patchCmd.AddCommand(patchIosCmd)
 	patchCmd.AddCommand(patchListCmd)
 	patchCmd.AddCommand(patchPublishCmd)
 	patchCmd.AddCommand(patchRecallCmd)

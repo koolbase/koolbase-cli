@@ -372,3 +372,47 @@ func appBundleRoot(binaryPath string) (string, error) {
 	}
 	return "", fmt.Errorf("no enclosing .app bundle found for %s", binaryPath)
 }
+// buildKBPIPatch mints a signed kind=5 patch: a 128-byte KBPM header plus the
+// KBPI container as payload. Mirrors buildWholeBlobReplacePatch (kind=3): the
+// payload is bound to the signed header via SHA-256(payload)[0:16], and build_id
+// pins the patch to the running BASE binary.
+//
+//	[8]       kind = 5 (iOS bytecode / KBPI)
+//	[16..23]  build_id (base)
+//	[24..31]  len(KBPI payload)
+//	[40..55]  SHA-256(payload)[0:16]
+//	[56..63]  base instr_size (for the build_id check)
+//	[64..127] Ed25519 sig over [0..63]
+//	[128..]   KBPI container
+func buildKBPIPatch(base *appBinaryInfo, kbpi []byte, privateKeyPath string) ([]byte, error) {
+	keyBytes, err := loadKey(privateKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(kbpi) == 0 {
+		return nil, fmt.Errorf("empty KBPI payload")
+	}
+	if base.InstrSize == 0 {
+		return nil, fmt.Errorf("base instr_size is 0 — base analysis incomplete")
+	}
+
+	ph := sha256.Sum256(kbpi)
+
+	header := make([]byte, 128)
+	copy(header[0:4], []byte("KBPM"))
+	binary.LittleEndian.PutUint16(header[4:6], 1)
+	binary.LittleEndian.PutUint16(header[6:8], 64)
+	header[8] = 5 // kind = iOS bytecode / KBPI
+	copy(header[16:24], base.BuildID)
+	binary.LittleEndian.PutUint64(header[24:32], uint64(len(kbpi)))
+	copy(header[40:56], ph[:16])
+	binary.LittleEndian.PutUint64(header[56:64], base.InstrSize)
+
+	sig := ed25519.Sign(ed25519.PrivateKey(keyBytes), header[0:64])
+	copy(header[64:128], sig)
+
+	out := make([]byte, 0, 128+len(kbpi))
+	out = append(out, header...)
+	out = append(out, kbpi...)
+	return out, nil
+}
