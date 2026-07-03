@@ -18,10 +18,13 @@ import (
 // in the CLI, not in dart2bytecode.
 //
 // KBPI := "KBPI" | u16 ver=1 | u16 rsvd | u32 bc_len | bytecode
-//              | u32 rows | rows×( u32 name_len | name utf8 | key[32] )
+//
+//	| u32 rows | rows×( u32 name_len | name utf8 | key[32] )
 //
 // v1 reads the TEXT key file that KOOLBASE_KEY_OUT already emits — lines of
-//   <uri|scope|kind|name>\t<64-hex-char key>
+//
+//	<uri|scope|kind|name>\t<64-hex-char key>
+//
 // (a proper binary sidecar from dart2bytecode is a later cleanup; the text file
 // carries the same information and is already produced, so the CLI is provable
 // against the device-proven path with zero compiler change). The module
@@ -55,13 +58,24 @@ func packKBPI(bytecodePath, keysPath string) ([]byte, error) {
 		if len(parts) != 2 {
 			continue
 		}
+
 		prefix, keyHex := parts[0], strings.TrimSpace(parts[1])
-		// prefix = uri|scope|kind|name -> bare name is the last field.
+		// prefix = uri|scope|kind|name. Carrier VM name convention:
+		//   scope == "TOP"  -> bare name          (top-level fn)
+		//   scope == class  -> "<scope>.<name>"   (hoisted method, koolbase-patch-mode)
 		seg := strings.Split(prefix, "|")
-		name := seg[len(seg)-1]
-		if name == "main" { // module entrypoint, not an override target
-			continue
+		if len(seg) != 4 {
+			return nil, fmt.Errorf("bad keytable prefix %q", prefix)
 		}
+		scope, name := seg[1], seg[3]
+		if scope == "TOP" {
+			if name == "main" { // module entrypoint, not an override target
+				continue
+			}
+		} else {
+			name = scope + "." + name
+		}
+
 		key, derr := hex.DecodeString(keyHex)
 		if derr != nil || len(key) != 32 {
 			return nil, fmt.Errorf("bad key for %q: %d bytes", name, len(key))
