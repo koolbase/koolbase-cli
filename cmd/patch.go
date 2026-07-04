@@ -438,6 +438,7 @@ func init() {
 	patchIosCmd.Flags().String("key", "private.key", "Path to Ed25519 private key")
 	patchIosCmd.Flags().Bool("stage-local", false, "Write staged.kbpatch to the VM handshake dir")
 	patchIosCmd.Flags().Bool("raw", false, "Emit bare KBPI (device-proven path) instead of signed KBPM")
+	patchIosCmd.Flags().Bool("allow-unsafe", false, "Skip the safety fence that rejects patches with known-unpatchable constructs (suspending async, field access). For debugging only.")
 
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")
 	patchListCmd.Flags().String("release", "", "Release ID (required)")

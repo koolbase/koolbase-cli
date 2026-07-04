@@ -129,6 +129,16 @@ var patchIosCmd = &cobra.Command{
 			return fmt.Errorf("--keys is required")
 		}
 
+		allowUnsafe, _ := cmd.Flags().GetBool("allow-unsafe")
+		if !allowUnsafe {
+			bc, rerr := os.ReadFile(bytecodePath)
+			if rerr != nil {
+				return fmt.Errorf("read bytecode for safety check: %w", rerr)
+			}
+			if ferr := fenceUnsafePatterns(bc); ferr != nil {
+				return fmt.Errorf("patch rejected by safety fence: %w (use --allow-unsafe to override, debugging only)", ferr)
+			}
+		}
 		fmt.Println("  Packing KBPI container...")
 		kbpi, err := packKBPI(bytecodePath, keysPath)
 		if err != nil {
