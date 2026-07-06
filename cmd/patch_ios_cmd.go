@@ -122,11 +122,14 @@ var patchIosCmd = &cobra.Command{
 		stageLocal, _ := cmd.Flags().GetBool("stage-local")
 		raw, _ := cmd.Flags().GetBool("raw")
 
-		if bytecodePath == "" {
-			return fmt.Errorf("--bytecode is required")
-		}
-		if keysPath == "" {
-			return fmt.Errorf("--keys is required")
+		kbpiPath, _ := cmd.Flags().GetString("kbpi")
+		if kbpiPath == "" {
+			if bytecodePath == "" {
+				return fmt.Errorf("--bytecode is required (or use --kbpi to wrap a pre-built container)")
+			}
+			if keysPath == "" {
+				return fmt.Errorf("--keys is required (or use --kbpi)")
+			}
 		}
 
 		allowUnsafe, _ := cmd.Flags().GetBool("allow-unsafe")
@@ -139,12 +142,23 @@ var patchIosCmd = &cobra.Command{
 				return fmt.Errorf("patch rejected by safety fence: %w (use --allow-unsafe to override, debugging only)", ferr)
 			}
 		}
-		fmt.Println("  Packing KBPI container...")
-		kbpi, err := packKBPI(bytecodePath, keysPath)
-		if err != nil {
-			return fmt.Errorf("pack KBPI failed: %w", err)
+
+		var kbpi []byte
+		var err error
+		if kbpiPath != "" {
+			kbpi, err = os.ReadFile(kbpiPath)
+			if err != nil {
+				return fmt.Errorf("read --kbpi: %w", err)
+			}
+			fmt.Printf("  ✓ using pre-built KBPI %s (%d bytes)\n", kbpiPath, len(kbpi))
+		} else {
+			fmt.Println("  Packing KBPI container...")
+			kbpi, err = packKBPI(bytecodePath, keysPath)
+			if err != nil {
+				return fmt.Errorf("pack KBPI failed: %w", err)
+			}
+			fmt.Printf("  ✓ KBPI container (%d bytes)\n", len(kbpi))
 		}
-		fmt.Printf("  ✓ KBPI container (%d bytes)\n", len(kbpi))
 
 		var blob []byte
 		var kindDesc string
