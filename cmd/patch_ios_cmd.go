@@ -212,7 +212,14 @@ var patchIosCmd = &cobra.Command{
 		// No --stage-local: write next to the bytecode for inspection / manual
 		// delivery. Server upload/publish wiring mirrors `patch push` and is a
 		// follow-up (kept out of v1 to keep the packer self-contained).
-		outPath := strings.TrimSuffix(bytecodePath, filepath.Ext(bytecodePath)) + ".kbpatch"
+		// Base the output name on whichever input we actually have: --bytecode
+		// (pack path) or --kbpi (pre-built wrap path). Empty bytecodePath under
+		// --kbpi previously produced a hidden bare ".kbpatch" in cwd.
+		srcForName := bytecodePath
+		if srcForName == "" {
+			srcForName, _ = cmd.Flags().GetString("kbpi")
+		}
+		outPath := strings.TrimSuffix(srcForName, filepath.Ext(srcForName)) + ".kbpatch"
 		if err := os.WriteFile(outPath, blob, 0o644); err != nil {
 			return fmt.Errorf("write patch: %w", err)
 		}
