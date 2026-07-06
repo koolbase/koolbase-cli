@@ -439,6 +439,7 @@ func init() {
 	patchIosCmd.Flags().Bool("stage-local", false, "Write staged.kbpatch to the VM handshake dir")
 	patchIosCmd.Flags().Bool("raw", false, "Emit bare KBPI (device-proven path) instead of signed KBPM")
 	patchIosCmd.Flags().String("kbpi", "", "Path to a pre-built KBPI container to wrap directly (skips packing from --bytecode/--keys)")
+	patchIosCmd.Flags().String("build-id-override", "", "TEST ONLY: force a specific 8-byte hex build_id before signing (proves -400 pinning)")
 	patchIosCmd.Flags().Bool("allow-unsafe", false, "Skip the safety fence that rejects patches with known-unpatchable constructs (suspending async, field access). For debugging only.")
 
 	patchListCmd.Flags().String("app", "", "App (project) ID (required)")

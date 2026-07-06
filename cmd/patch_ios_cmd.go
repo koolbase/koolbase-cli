@@ -176,6 +176,15 @@ var patchIosCmd = &cobra.Command{
 			}
 			fmt.Printf("  ✓ base build_id %s (instr_size %d)\n",
 				hex.EncodeToString(base.BuildID), base.InstrSize)
+			bidOverride, _ := cmd.Flags().GetString("build-id-override")
+			if bidOverride != "" {
+				raw, derr := hex.DecodeString(bidOverride)
+				if derr != nil || len(raw) != 8 {
+					return fmt.Errorf("--build-id-override must be 16 hex chars (8 bytes)")
+				}
+				copy(base.BuildID, raw)
+				fmt.Printf("  ⚠ build_id OVERRIDDEN to %s (test only)\n", bidOverride)
+			}
 			blob, err = buildKBPIPatch(base, kbpi, keyPath)
 			if err != nil {
 				return fmt.Errorf("KBPM envelope build failed: %w", err)
