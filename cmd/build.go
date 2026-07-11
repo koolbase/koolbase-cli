@@ -19,6 +19,7 @@ var (
 	buildRelease             bool
 	buildVersion             string
 	buildFlutterSDK          string
+	buildSaveFlutterSDK      bool
 	buildNoTreeShake         bool
 	buildTargetArch          string
 	buildFlavor              string
@@ -156,6 +157,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	wantFlutter := baseFlutterVersion(version)
 	if verr := verifyFlutterVersion(flutterBin, wantFlutter); verr != nil {
 		return verr
+	}
+
+	// Persist the SDK path once, if asked — only reached after the version check
+	// passes, so we never save a mismatched SDK. Save failures are non-fatal.
+	if buildSaveFlutterSDK && buildFlutterSDK != "" {
+		if cfg, cerr := config.Load(); cerr == nil {
+			cfg.FlutterSDKPath = buildFlutterSDK
+			if serr := config.Save(cfg); serr == nil {
+				fmt.Printf("  ✓ saved Flutter SDK path: %s (future builds use it automatically)\n", buildFlutterSDK)
+			} else {
+				fmt.Printf("  ⚠ could not save Flutter SDK path: %v\n", serr)
+			}
+		} else {
+			fmt.Printf("  ⚠ --save-flutter-sdk skipped (not logged in): %v\n", cerr)
+		}
 	}
 
 	flutterArgs := []string{
@@ -551,6 +567,7 @@ func init() {
 	buildCmd.Flags().BoolVar(&buildRelease, "release", false, "Build in release mode")
 	buildCmd.Flags().StringVar(&buildVersion, "engine", "", "Engine version to use (e.g. 3.22.3-koolbase.1)")
 	buildCmd.Flags().StringVar(&buildFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK (e.g. ~/flutter-3.44.0)")
+	buildCmd.Flags().BoolVar(&buildSaveFlutterSDK, "save-flutter-sdk", false, "Persist --flutter-sdk to config so future builds resolve it automatically")
 	buildCmd.Flags().BoolVar(&buildNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking (keeps all icon glyphs; larger bundle)")
 	buildCmd.Flags().StringVar(&buildTargetArch, "target-arch", "arm64", "Android target ABI: arm64 (arm64-v8a, default) or arm (armeabi-v7a)")
 	buildCmd.Flags().StringVar(&buildFlavor, "flavor", "", "Build flavor (e.g. prod); selects the gradle product flavor and renames outputs to app-<flavor>-release.*")
