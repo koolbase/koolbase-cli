@@ -298,6 +298,9 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if platform == "macos" {
 		artType = "app"
 		abiTag = hostArch()
+	} else if platform == "ios" {
+		artType = "app"  // iOS produces Runner.app, never an apk
+		abiTag = "arm64" // iOS device is always arm64
 	}
 	// Structured, machine-readable line consumed by `koolbase release` across the
 	// subprocess boundary. path= is intentionally last so values containing
