@@ -64,8 +64,9 @@ Examples:
 
 func runBuild(cmd *cobra.Command, args []string) error {
 	platform := args[0]
-	if platform != "macos" && platform != "android" {
-		return fmt.Errorf("platform %q not supported — use 'macos' or 'android'", platform)
+
+	if platform != "macos" && platform != "android" && platform != "ios" {
+		return fmt.Errorf("platform %q not supported — use 'macos', 'android', or 'ios'", platform)
 	}
 
 	// Everything after '--' is forwarded to flutter verbatim (e.g. --target,
@@ -134,6 +135,10 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		localEngine = cfg
 		localEngineHost = "host_release_arm64"
 		flutterSubcmd = "apk"
+	case "ios":
+		localEngine = "ios_release"
+		localEngineHost = "host_release_arm64"
+		flutterSubcmd = "ios"
 	default: // macos
 		localEngine = "mac_release_" + hostArch()
 		localEngineHost = localEngine
@@ -176,6 +181,27 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	// works by default. --no-tree-shake-icons opts out if a build needs it.
 	if buildNoTreeShake {
 		flutterArgs = append(flutterArgs, "--no-tree-shake-icons")
+	}
+	// iOS code-push: inject the overridable-surface declaration and the
+	// gen-snapshot flag the VM-patch dispatch fix requires. The dynamic
+	// interface makes the declared host functions retained + overridable so a
+	// pushed patch can resolve and replace them; without it, apply returns -300
+	// (no host target). Auto-detected from the project root so the customer
+	// never types the flag. (See IOS_OVERRIDABLE_SURFACE_RECIPE.md.)
+	if platform == "ios" {
+		flutterArgs = append(flutterArgs,
+			"--extra-gen-snapshot-options=--force_indirect_calls")
+		if wd, werr := os.Getwd(); werr == nil {
+			yaml := filepath.Join(wd, "koolbase_dynamic_interface.yaml")
+			if _, serr := os.Stat(yaml); serr == nil {
+				flutterArgs = append(flutterArgs,
+					"--extra-front-end-options=--dynamic-interface="+yaml)
+				fmt.Printf("  dynamic interface: %s\n", yaml)
+			} else {
+				fmt.Println("  ⚠ no koolbase_dynamic_interface.yaml in project root — " +
+					"host functions won't be patchable (apply will return -300)")
+			}
+		}
 	}
 
 	// Developer's app-shaping flags, forwarded straight to flutter. --flavor is

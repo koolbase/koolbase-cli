@@ -44,7 +44,12 @@ func hostPlatform() string {
 // targetPlatform/targetArch are what the built app runs on. targetPlatform is
 // Android for now; targetArch is selected by the --target-arch flag on install
 // and list, normalized to a canonical registry token (arm64 | arm).
-func targetPlatform() string { return "android" }
+func targetPlatform() string {
+	if engineTargetPlatform == "ios" {
+		return "ios"
+	}
+	return "android"
+}
 func targetArch() string {
 	if a, ok := canonicalTargetArch(engineTargetArch); ok {
 		return a
@@ -55,6 +60,10 @@ func targetArch() string {
 // engineTargetArch holds the --target-arch flag value for install/list. Default
 // arm64 keeps existing behavior; "arm" selects armeabi-v7a.
 var engineTargetArch string
+
+// engineTargetPlatform holds the --target-platform flag value for install/list.
+// Empty or "android" → android (default, back-compat); "ios" → iOS engines.
+var engineTargetPlatform string
 
 // canonicalTargetArch normalizes any accepted --target-arch spelling to the
 // canonical registry token (arm64 | arm) that publish writes and install/list
@@ -250,4 +259,6 @@ func init() {
 
 	engineListCmd.Flags().StringVar(&engineTargetArch, "target-arch", "arm64", "Target ABI to list: arm64 (default) or arm (armeabi-v7a)")
 	engineInstallCmd.Flags().StringVar(&engineTargetArch, "target-arch", "arm64", "Target ABI to install: arm64 (default) or arm (armeabi-v7a)")
+	engineListCmd.Flags().StringVar(&engineTargetPlatform, "target-platform", "android", "Target platform to list: android (default) or ios")
+	engineInstallCmd.Flags().StringVar(&engineTargetPlatform, "target-platform", "android", "Target platform to install: android (default) or ios")
 }

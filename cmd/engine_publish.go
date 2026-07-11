@@ -25,6 +25,8 @@ var (
 	pubKeyPath        string
 	pubKeepZip        bool
 	pubTargetArch     string
+	pubTargetPlatform string
+	pubPackOnly       bool
 )
 
 // enginePublishCmd packs, signs, uploads, registers, and publishes a Koolbase
@@ -50,8 +52,7 @@ Example:
 }
 
 const (
-	pubHostArch       = "arm64" // host build arch (Apple silicon)
-	pubTargetPlatform = "android"
+	pubHostArch = "arm64" // host build arch (Apple silicon)
 )
 
 func pubHostPlatform() string {
@@ -63,9 +64,9 @@ func pubHostPlatform() string {
 
 func runEnginePublish(cmd *cobra.Command, args []string) error {
 	internalKey := os.Getenv("KOOLBASE_INTERNAL_KEY")
-	if internalKey == "" {
+	if internalKey == "" && !pubPackOnly {
 		return fmt.Errorf("KOOLBASE_INTERNAL_KEY is not set\n" +
-			"  export KOOLBASE_INTERNAL_KEY=$(doppler secrets get INTERNAL_API_KEY --plain --config prd)")
+			"  export KOOLBASE_INTERNAL_KEY=$(doppler secrets get INTERNAL_API_KEY --plain --config prd --project <your-project>)")
 	}
 	if pubFlutterVersion == "" {
 		return fmt.Errorf("--flutter-version is required (e.g. 3.44.0)")
@@ -92,8 +93,19 @@ func runEnginePublish(cmd *cobra.Command, args []string) error {
 	// 1. Pack lean artifact.
 	stageDir := filepath.Join(home, ".koolbase-pack", version)
 	fmt.Println("==> 1/6 Packing lean engine…")
-	if err := packLeanEngine(pubEngineSrc, stageDir, version, pubTargetArch); err != nil {
-		return fmt.Errorf("pack: %w", err)
+	if pubTargetPlatform == "ios" {
+		if err := packLeanEngineIOS(pubEngineSrc, stageDir, version); err != nil {
+			return fmt.Errorf("pack ios: %w", err)
+		}
+	} else {
+		if err := packLeanEngine(pubEngineSrc, stageDir, version, pubTargetArch); err != nil {
+			return fmt.Errorf("pack: %w", err)
+		}
+	}
+
+	if pubPackOnly {
+		fmt.Printf("  ✓ pack-only: staged at %s (no upload)\n", stageDir)
+		return nil
 	}
 
 	// 2. Zip.
@@ -345,6 +357,8 @@ func init() {
 	enginePublishCmd.Flags().IntVar(&pubRevision, "revision", 1, "Koolbase engine revision")
 	enginePublishCmd.Flags().StringVar(&pubKeyPath, "key", "", "Ed25519 engine signing key path")
 	enginePublishCmd.Flags().BoolVar(&pubKeepZip, "keep-zip", false, "Keep the built zip after publishing")
+	enginePublishCmd.Flags().BoolVar(&pubPackOnly, "pack-only", false, "Pack the lean artifact and stop (no zip/upload/publish) — for verification")
 	enginePublishCmd.Flags().StringVar(&pubTargetArch, "target-arch", "arm64", "Target ABI: arm64 (arm64-v8a, default) or arm (armeabi-v7a)")
+	enginePublishCmd.Flags().StringVar(&pubTargetPlatform, "target-platform", "android", "Target platform: android (default) or ios")
 	engineCmd.AddCommand(enginePublishCmd)
 }

@@ -74,6 +74,62 @@ func packLeanEngine(engineSrcOut, stageDir, version, targetArch string) error {
 	return nil
 }
 
+// packLeanEngineIOS stages the minimal iOS engine artifact a --local-engine iOS
+// build consumes into stageDir/src/out/{ios_release,host_release_arm64}/. The
+// host half is IDENTICAL to Android's (dart-sdk carries the retention snapshot);
+// only the target half differs. Proven by a real device build + patch-apply
+// (n=1, kPrice=999) against exactly these files (2026-07-11). iOS device is
+// always arm64, so there is no target-arch variation.
+func packLeanEngineIOS(engineSrcOut, stageDir, version string) error {
+	srcOut := filepath.Join(stageDir, "src", "out")
+	iosDst := filepath.Join(srcOut, "ios_release")
+	hostDst := filepath.Join(srcOut, "host_release_arm64")
+
+	if err := os.RemoveAll(stageDir); err != nil {
+		return err
+	}
+	for _, d := range []string{iosDst, hostDst} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+
+	iosSrc := filepath.Join(engineSrcOut, "ios_release")
+	hostSrc := filepath.Join(engineSrcOut, "host_release_arm64")
+
+	// --- iOS target artifacts (whole dirs) ---
+	for _, dir := range []string{"Flutter.framework", "Flutter.xcframework", "flutter_patched_sdk"} {
+		if err := copyTree(filepath.Join(iosSrc, dir), filepath.Join(iosDst, dir)); err != nil {
+			return fmt.Errorf("ios %s: %w", dir, err)
+		}
+	}
+	// gen_snapshot lives under universal/ on iOS (NOT top-level, unlike Android).
+	if err := os.MkdirAll(filepath.Join(iosDst, "universal"), 0o755); err != nil {
+		return err
+	}
+	copyOptionalFiles(filepath.Join(iosSrc, "universal"), filepath.Join(iosDst, "universal"),
+		[]string{"gen_snapshot_arm64"}, "ios universal")
+
+	// --- host tools (identical to Android; dart-sdk carries retention snapshot) ---
+	if err := copyTree(filepath.Join(hostSrc, "dart-sdk"), filepath.Join(hostDst, "dart-sdk")); err != nil {
+		return fmt.Errorf("host dart-sdk: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(hostDst, "gen"), 0o755); err != nil {
+		return err
+	}
+	copyOptionalFiles(filepath.Join(hostSrc, "gen"), filepath.Join(hostDst, "gen"),
+		[]string{"const_finder.dart.snapshot", "frontend_server_aot.dart.snapshot"}, "host gen")
+	if err := copyTree(filepath.Join(hostSrc, "gen", "dart-pkg"), filepath.Join(hostDst, "gen", "dart-pkg")); err != nil {
+		return fmt.Errorf("host gen/dart-pkg: %w", err)
+	}
+	if err := copyTree(filepath.Join(hostSrc, "shader_lib"), filepath.Join(hostDst, "shader_lib")); err != nil {
+		return fmt.Errorf("host shader_lib: %w", err)
+	}
+	copyOptionalFiles(hostSrc, hostDst, []string{"font-subset", "impellerc"}, "host")
+
+	return nil
+}
+
 func copyOptionalFiles(srcDir, dstDir string, names []string, label string) {
 	for _, n := range names {
 		src := filepath.Join(srcDir, n)
