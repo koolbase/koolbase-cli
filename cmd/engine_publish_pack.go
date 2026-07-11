@@ -117,8 +117,14 @@ func packLeanEngineIOS(engineSrcOut, stageDir, version string) error {
 	if err := os.MkdirAll(filepath.Join(hostDst, "gen"), 0o755); err != nil {
 		return err
 	}
+
+	// Only const_finder is read from gen/. The frontend_server snapshot is read
+	// from dart-sdk/bin/snapshots/ (the retention-carrying one, verified against
+	// flutter_tools artifacts.dart), so a gen/ copy would be dead, confusing, and
+	// risks future shadowing — omit it.
 	copyOptionalFiles(filepath.Join(hostSrc, "gen"), filepath.Join(hostDst, "gen"),
-		[]string{"const_finder.dart.snapshot", "frontend_server_aot.dart.snapshot"}, "host gen")
+		[]string{"const_finder.dart.snapshot"}, "host gen")
+
 	if err := copyTree(filepath.Join(hostSrc, "gen", "dart-pkg"), filepath.Join(hostDst, "gen", "dart-pkg")); err != nil {
 		return fmt.Errorf("host gen/dart-pkg: %w", err)
 	}
