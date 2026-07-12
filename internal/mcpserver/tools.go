@@ -23,6 +23,7 @@ func (s *Server) registerTools() {
 	s.addSetFlag()
 	s.addListConfigs()
 	s.addSetConfig()
+	s.addListPatches()
 }
 
 // --- whoami -----------------------------------------------------------------
@@ -404,5 +405,79 @@ func (s *Server) addSetConfig() {
 			ID: updated.ID, Key: updated.Key, Value: decodeJSON(updated.Value),
 			ValueType: updated.ValueType, Description: updated.Description,
 		}, nil
+	})
+}
+
+// --- list_patches -----------------------------------------------------------
+
+type listPatchesIn struct {
+	ProjectID string `json:"project_id" jsonschema:"UUID of the project (app) whose code-push patches to list"`
+	ReleaseID string `json:"release_id,omitempty" jsonschema:"optional: limit to one release's patches. Omit to list patches across all releases of the app."`
+}
+
+type patchSummary struct {
+	PatchID           string `json:"patch_id"`
+	ReleaseID         string `json:"release_id"`
+	BuildID           string `json:"build_id" jsonschema:"the base build these patches apply on top of"`
+	Platform          string `json:"platform"`
+	AppVersion        string `json:"app_version"`
+	PatchNumber       int    `json:"patch_number"`
+	Status            string `json:"status" jsonschema:"draft, published, or recalled"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	Mandatory         bool   `json:"mandatory"`
+	SizeBytes         int    `json:"size_bytes"`
+	ReleaseNotes      string `json:"release_notes,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	PublishedAt       string `json:"published_at,omitempty"`
+	RecalledAt        string `json:"recalled_at,omitempty"`
+}
+
+type listPatchesOut struct {
+	Patches []patchSummary `json:"patches"`
+}
+
+func (s *Server) addListPatches() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_list_patches",
+		Description: "List code-push (OTA) patches for a Koolbase app, with their status (draft/published/recalled), rollout percentage, and target build. " +
+			"Omit release_id to see patches across all releases. Read-only — does not publish or recall anything.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listPatchesIn) (*mcp.CallToolResult, listPatchesOut, error) {
+		// Resolve which releases to scan: one, or all for the app.
+		var releases []api.Release
+		if in.ReleaseID != "" {
+			releases = []api.Release{{ID: in.ReleaseID}}
+		} else {
+			rels, err := s.client.ListReleases(in.ProjectID)
+			if err != nil {
+				return nil, listPatchesOut{}, mapScopeErr(err)
+			}
+			releases = rels
+		}
+
+		// Index release metadata (build_id/platform/version) to enrich patches.
+		relMeta := make(map[string]api.Release, len(releases))
+		for _, r := range releases {
+			relMeta[r.ID] = r
+		}
+
+		out := listPatchesOut{Patches: []patchSummary{}}
+		for _, r := range releases {
+			patches, err := s.client.ListPatches(in.ProjectID, r.ID)
+			if err != nil {
+				return nil, listPatchesOut{}, mapScopeErr(err)
+			}
+			meta := relMeta[r.ID]
+			for _, p := range patches {
+				out.Patches = append(out.Patches, patchSummary{
+					PatchID: p.ID, ReleaseID: p.ReleaseID,
+					BuildID: meta.BuildID, Platform: meta.Platform, AppVersion: meta.AppVersion,
+					PatchNumber: p.PatchNumber, Status: p.Status,
+					RolloutPercentage: p.RolloutPercentage, Mandatory: p.Mandatory,
+					SizeBytes: p.SizeBytes, ReleaseNotes: p.ReleaseNotes,
+					CreatedAt: p.CreatedAt, PublishedAt: p.PublishedAt, RecalledAt: p.RecalledAt,
+				})
+			}
+		}
+		return nil, out, nil
 	})
 }
