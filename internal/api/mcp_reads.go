@@ -85,3 +85,31 @@ func (c *Client) ListFlags(envID string) ([]Flag, error) {
 	}
 	return flags, nil
 }
+
+// UpdateFlagRequest is the full-replace body PUT /flags/{flag_id} expects.
+// All four fields are always sent; callers wanting partial semantics must
+// read current state and merge before calling (the MCP set_flag tool does).
+type UpdateFlagRequest struct {
+	Enabled           bool   `json:"enabled"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	KillSwitch        bool   `json:"kill_switch"`
+	Description       string `json:"description"`
+}
+
+// UpdateFlag replaces a feature flag's mutable fields. Returns the updated
+// flag. A read-scoped key receives 403 insufficient_scope here (surfaced by
+// the status/body in the error), which callers should relay clearly.
+func (c *Client) UpdateFlag(flagID string, req UpdateFlagRequest) (*Flag, error) {
+	data, status, err := c.do("PUT", "/v1/flags/"+flagID, req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("update flag failed (%d): %s", status, string(data))
+	}
+	var f Flag
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}

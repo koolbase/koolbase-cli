@@ -2,7 +2,10 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -16,6 +19,7 @@ func (s *Server) registerTools() {
 	s.addGetProject()
 	s.addListEnvironments()
 	s.addListFlags()
+	s.addSetFlag()
 }
 
 // --- whoami -----------------------------------------------------------------
@@ -184,4 +188,99 @@ func (s *Server) addListEnvironments() {
 		}
 		return nil, out, nil
 	})
+}
+
+// --- set_flag (first write tool) --------------------------------------------
+
+type setFlagIn struct {
+	EnvironmentID     string `json:"environment_id" jsonschema:"UUID of the environment the flag belongs to"`
+	FlagID            string `json:"flag_id" jsonschema:"UUID of the flag to update (from koolbase_list_flags)"`
+	Enabled           *bool  `json:"enabled,omitempty" jsonschema:"if set, turn the flag on or off; omit to leave unchanged"`
+	RolloutPercentage *int   `json:"rollout_percentage,omitempty" jsonschema:"if set, target rollout 0-100; omit to leave unchanged"`
+	KillSwitch        *bool  `json:"kill_switch,omitempty" jsonschema:"if set, engage or release the kill switch; omit to leave unchanged"`
+	Description       *string `json:"description,omitempty" jsonschema:"if set, replace the description; omit to leave unchanged"`
+}
+
+type setFlagOut struct {
+	ID                string `json:"id"`
+	Key               string `json:"key"`
+	Enabled           bool   `json:"enabled"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	KillSwitch        bool   `json:"kill_switch"`
+	Description       string `json:"description"`
+}
+
+// addSetFlag registers the first write tool. It merges the caller's specified
+// fields onto the flag's current state before PUTting, so an agent can change
+// one field without resetting the others (the API route is a full replace).
+//
+// Requires a write-scoped key; a read key yields 403 insufficient_scope from
+// the API, which this tool rewrites into an actionable message.
+func (s *Server) addSetFlag() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_set_flag",
+		Description: "Update a Koolbase feature flag's state (enabled, rollout percentage, kill switch, description). " +
+			"Only the fields you provide are changed; others keep their current values. " +
+			"This changes live app behavior for users on this environment. Requires a write-scoped API key.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setFlagIn) (*mcp.CallToolResult, setFlagOut, error) {
+		// Read current state so omitted fields are preserved (route is a full replace).
+		flags, err := s.client.ListFlags(in.EnvironmentID)
+		if err != nil {
+			return nil, setFlagOut{}, mapScopeErr(err)
+		}
+		var cur *api.Flag
+		for i := range flags {
+			if flags[i].ID == in.FlagID {
+				cur = &flags[i]
+				break
+			}
+		}
+		if cur == nil {
+			return nil, setFlagOut{}, fmt.Errorf("flag %s not found in environment %s", in.FlagID, in.EnvironmentID)
+		}
+
+		// Merge: start from current, overlay only what the caller specified.
+		req := api.UpdateFlagRequest{
+			Enabled:           cur.Enabled,
+			RolloutPercentage: cur.RolloutPercentage,
+			KillSwitch:        cur.KillSwitch,
+			Description:       cur.Description,
+		}
+		if in.Enabled != nil {
+			req.Enabled = *in.Enabled
+		}
+		if in.RolloutPercentage != nil {
+			req.RolloutPercentage = *in.RolloutPercentage
+		}
+		if in.KillSwitch != nil {
+			req.KillSwitch = *in.KillSwitch
+		}
+		if in.Description != nil {
+			req.Description = *in.Description
+		}
+
+		updated, err := s.client.UpdateFlag(in.FlagID, req)
+		if err != nil {
+			return nil, setFlagOut{}, mapScopeErr(err)
+		}
+		return nil, setFlagOut{
+			ID: updated.ID, Key: updated.Key, Enabled: updated.Enabled,
+			RolloutPercentage: updated.RolloutPercentage,
+			KillSwitch:        updated.KillSwitch, Description: updated.Description,
+		}, nil
+	})
+}
+
+// mapScopeErr rewrites the API's 403 insufficient_scope into an actionable
+// message naming the fix, and passes other errors through unchanged.
+func mapScopeErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "insufficient_scope") || strings.Contains(msg, "(403)") {
+		return fmt.Errorf("this API key lacks write permission for this operation. " +
+			"Mint a write-scoped key in the Koolbase dashboard and set KOOLBASE_API_KEY to it")
+	}
+	return err
 }

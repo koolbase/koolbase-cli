@@ -64,6 +64,20 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) 
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// A 403 with code "insufficient_scope" is a key-scope problem, not a
+		// wrong-account problem: re-logging in won't help — a higher-scoped
+		// key is needed. Distinguish it so the message names the real fix
+		// (matters especially for API-key callers like the MCP server, which
+		// cannot run `koolbase login`).
+		if resp.StatusCode == http.StatusForbidden {
+			var body struct {
+				Code  string `json:"code"`
+				Error string `json:"error"`
+			}
+			if json.Unmarshal(data, &body) == nil && body.Code == "insufficient_scope" {
+				return data, resp.StatusCode, fmt.Errorf("insufficient_scope: %s", body.Error)
+			}
+		}
 		return data, resp.StatusCode, authError(resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusNotFound {
