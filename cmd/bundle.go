@@ -196,14 +196,14 @@ var bundleListCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Printf("\n  %-42s %-10s %-8s %-10s %-12s %-12s %-8s %s\n",
-    "ID", "VERSION", "PLATFORM", "CHANNEL", "STATUS", "ROLLOUT", "SIZE", "CREATED")
+			"ID", "VERSION", "PLATFORM", "CHANNEL", "STATUS", "ROLLOUT", "SIZE", "CREATED")
 		for _, b := range bundles {
 			fmt.Printf("  %-42s v%-9d %-8s %-10s %-12s %-12s %-8s %s\n",
-    b.ID, b.Version, b.Platform, b.Channel,
-    statusIcon(b.Status),
-    fmt.Sprintf("%d%%", b.RolloutPercentage),
-    humanizeBytes(b.SizeBytes),
-    formatTime(b.CreatedAt),
+				b.ID, b.Version, b.Platform, b.Channel,
+				statusIcon(b.Status),
+				fmt.Sprintf("%d%%", b.RolloutPercentage),
+				humanizeBytes(b.SizeBytes),
+				formatTime(b.CreatedAt),
 			)
 		}
 		fmt.Println()
@@ -500,9 +500,9 @@ func init() {
 	bundleDeployCmd.Flags().Int("rollout", 100, "Rollout percentage 0-100")
 	bundleDeployCmd.Flags().Bool("dry-run", false, "Validate and package without uploading")
 
-bundleDeleteCmd.Flags().String("app", "", "App (project) ID (required)")
-bundleDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-bundleCmd.AddCommand(bundleDeleteCmd)
+	bundleDeleteCmd.Flags().String("app", "", "App (project) ID (required)")
+	bundleDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bundleCmd.AddCommand(bundleDeleteCmd)
 
 	bundleRecallCmd.Flags().String("app", "", "App (project) ID (required)")
 	bundleRecallCmd.Flags().String("bundle", "", "Bundle ID to recall (required)")

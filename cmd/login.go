@@ -39,6 +39,7 @@ var loginCmd = &cobra.Command{
 
 		cfg := &config.Config{
 			APIKey:  resp.AccessToken,
+			Email:   resp.User.Email,
 			BaseURL: "https://api.koolbase.com",
 		}
 

@@ -63,7 +63,45 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) 
 		return nil, resp.StatusCode, err
 	}
 
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return data, resp.StatusCode, authError(resp.StatusCode)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		// The API answers 404 both for "doesn't exist" and "not yours"
+		// (deliberate: access checks don't confirm resource existence). Say
+		// so, and name the account, so a wrong-org login is diagnosable.
+		return data, resp.StatusCode, notFoundError()
+	}
 	return data, resp.StatusCode, nil
+}
+
+// identityHint is set by command setup (the logged-in email from config) so
+// auth failures can say WHO the CLI is acting as — a stale or wrong-account
+// token then fails with an actionable message instead of a bare
+// "unauthorized" (Phase 8 dogfood finding).
+var identityHint string
+
+// SetIdentityHint records the account label used in auth-failure messages.
+func SetIdentityHint(email string) { identityHint = email }
+
+func notFoundError() error {
+	who := "the current account"
+	if identityHint != "" {
+		who = identityHint
+	}
+	return fmt.Errorf("not found — either it does not exist, or %s has no access to it (check `koolbase whoami`; log in with the account that owns this project if needed)", who)
+}
+
+func authError(status int) error {
+	who := "an unknown account (run `koolbase whoami`)"
+	if identityHint != "" {
+		who = identityHint
+	}
+	verb := "was rejected"
+	if status == http.StatusForbidden {
+		verb = "lacks access to this resource"
+	}
+	return fmt.Errorf("authentication as %s %s — check `koolbase whoami`, or `koolbase login` with the account that owns this project", who, verb)
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────────────
@@ -785,14 +823,14 @@ func (c *Client) UpsertSecret(projectID, name, value string) error {
 
 func (c *Client) DeleteSecret(projectID, name string) error {
 	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/secrets/"+name, nil)
+	if status == 404 {
+		return fmt.Errorf("secret %s does not exist", name)
+	}
 	if err != nil {
 		return err
 	}
 	if status == 200 || status == 204 {
 		return nil
-	}
-	if status == 404 {
-		return fmt.Errorf("secret %s does not exist", name)
 	}
 	var errResp struct {
 		Error string `json:"error"`
@@ -1078,14 +1116,14 @@ func (c *Client) DeleteUniqueConstraint(projectID, collection, constraintID stri
 
 func (c *Client) DeleteBundle(appID, bundleID string) error {
 	data, status, err := c.do("DELETE", "/v1/apps/"+appID+"/bundles/"+bundleID, nil)
+	if status == 404 {
+		return fmt.Errorf("bundle %s does not exist", bundleID)
+	}
 	if err != nil {
 		return err
 	}
 	if status == 200 || status == 204 {
 		return nil
-	}
-	if status == 404 {
-		return fmt.Errorf("bundle %s does not exist", bundleID)
 	}
 	if status == 409 {
 		return fmt.Errorf("bundle %s is published — recall it first with `koolbase bundle recall`", bundleID)
@@ -1408,11 +1446,11 @@ func (c *Client) GetEngineDownload(flutterVersion, hostPlatform, hostArch, targe
 	q.Set("target_arch", targetArch)
 	path := fmt.Sprintf("/v1/engines/%s/download?%s", flutterVersion, q.Encode())
 	data, status, err := c.do(http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
 	if status == http.StatusNotFound {
 		return nil, fmt.Errorf("no published engine for flutter %s (host %s/%s -> target %s/%s)", flutterVersion, hostPlatform, hostArch, targetPlatform, targetArch)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("get download failed (%d): %s", status, string(data))
@@ -1509,11 +1547,11 @@ func (c *Client) ConfirmReleaseBase(appID, releaseID, storageKey string) error {
 func (c *Client) GetReleaseBaseDownloadURL(appID, releaseID string) (*BaseDownloadURLResponse, error) {
 	path := "/v1/apps/" + appID + "/releases/" + releaseID + "/base-download-url"
 	data, status, err := c.do(http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
 	if status == http.StatusNotFound {
 		return nil, nil // no stored base — caller falls back to --binary
+	}
+	if err != nil {
+		return nil, err
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("base download url: unexpected status %d: %s", status, string(data))

@@ -3,13 +3,21 @@ package cmd
 import (
 	"os"
 
+	"github.com/kennedyowusu/koolbase-cli/internal/api"
+	"github.com/kennedyowusu/koolbase-cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "koolbase",
-	Short:         "Koolbase CLI — manage your Koolbase project from the terminal",
-	SilenceUsage:  true,
+	Use:          "koolbase",
+	Short:        "Koolbase CLI — manage your Koolbase project from the terminal",
+	SilenceUsage: true,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Best-effort: label auth failures with the logged-in account.
+		if cfg, err := config.Load(); err == nil && cfg.Email != "" {
+			api.SetIdentityHint(cfg.Email)
+		}
+	},
 	Long: `
 ██╗  ██╗ ██████╗  ██████╗ ██╗     ██████╗  █████╗ ███████╗███████╗
 ██║ ██╔╝██╔═══██╗██╔═══██╗██║     ██╔══██╗██╔══██╗██╔════╝██╔════╝

@@ -11,6 +11,7 @@ const configFileName = "config.json"
 
 type Config struct {
 	APIKey         string `json:"api_key"`
+	Email          string `json:"email,omitempty"`
 	BaseURL        string `json:"base_url"`
 	ProjectID      string `json:"project_id"`
 	FlutterSDKPath string `json:"flutter_sdk_path,omitempty"`
@@ -60,7 +61,7 @@ func Load() (*Config, error) {
 		cfg.ProjectID = v
 	}
 
-if v := os.Getenv("KOOLBASE_FLUTTER_SDK"); v != "" {
+	if v := os.Getenv("KOOLBASE_FLUTTER_SDK"); v != "" {
 		cfg.FlutterSDKPath = v
 	}
 

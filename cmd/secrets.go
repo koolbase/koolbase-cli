@@ -63,8 +63,8 @@ var secretsListCmd = &cobra.Command{
 }
 
 var secretsSetCmd = &cobra.Command{
-	Use:     "set <name>",
-	Short:   "Create or update a secret (upsert)",
+	Use:   "set <name>",
+	Short: "Create or update a secret (upsert)",
 	Example: `  koolbase secrets set STRIPE_KEY --value sk_live_xxx --project proj_123
   echo "$STRIPE_KEY" | koolbase secrets set STRIPE_KEY --stdin --project proj_123
   koolbase secrets set STRIPE_KEY --from-file ./stripe.key --project proj_123`,

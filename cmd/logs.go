@@ -79,16 +79,16 @@ var logsCmd = &cobra.Command{
 				fmt.Printf("   Error: %s\n", log.Error)
 			}
 			if log.Output != "" {
-					output := log.Output
-					marker := "__KOOLBASE_RESULT__"
-					if idx := strings.Index(output, marker); idx >= 0 {
-						output = output[idx+len(marker):]
-					}
-					output = strings.TrimSpace(output)
-					if output != "" {
-						fmt.Printf("   Output: %s\n", output)
-					}
+				output := log.Output
+				marker := "__KOOLBASE_RESULT__"
+				if idx := strings.Index(output, marker); idx >= 0 {
+					output = output[idx+len(marker):]
 				}
+				output = strings.TrimSpace(output)
+				if output != "" {
+					fmt.Printf("   Output: %s\n", output)
+				}
+			}
 			fmt.Println()
 		}
 		return nil

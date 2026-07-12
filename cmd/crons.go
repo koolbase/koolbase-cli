@@ -142,8 +142,8 @@ var cronsDeleteCmd = &cobra.Command{
 }
 
 var cronsToggleCmd = &cobra.Command{
-	Use:     "toggle <cron-id>",
-	Short:   "Enable or disable a cron schedule",
+	Use:   "toggle <cron-id>",
+	Short: "Enable or disable a cron schedule",
 	Example: `  koolbase crons toggle 18f79c3a --enable --project proj_123
   koolbase crons toggle 18f79c3a --disable --project proj_123`,
 	Args: cobra.ExactArgs(1),
