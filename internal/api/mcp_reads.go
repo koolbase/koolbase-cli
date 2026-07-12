@@ -113,3 +113,56 @@ func (c *Client) UpdateFlag(flagID string, req UpdateFlagRequest) (*Flag, error)
 	}
 	return &f, nil
 }
+
+// Config is a remote-config entry from GET /v1/environments/{env_id}/configs.
+// Value is raw JSON: a string config is "text", a number is 42, a bool is
+// true, a json config is an object/array. ValueType records which.
+type Config struct {
+	ID            string          `json:"id"`
+	EnvironmentID string          `json:"environment_id"`
+	Key           string          `json:"key"`
+	Value         json.RawMessage `json:"value"`
+	ValueType     string          `json:"value_type"`
+	Description   string          `json:"description"`
+}
+
+// ListConfigs returns the remote-config entries of an environment.
+func (c *Client) ListConfigs(envID string) ([]Config, error) {
+	data, status, err := c.do("GET", "/v1/environments/"+envID+"/configs", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("list configs failed (%d): %s", status, string(data))
+	}
+	var configs []Config
+	if err := json.Unmarshal(data, &configs); err != nil {
+		return nil, err
+	}
+	return configs, nil
+}
+
+// UpdateConfigRequest is the body PUT /v1/configs/{config_id} expects. Value
+// is raw JSON matching the config's value_type. Full replace of value +
+// description; callers wanting partial semantics merge before calling.
+type UpdateConfigRequest struct {
+	Value       json.RawMessage `json:"value"`
+	Description string          `json:"description"`
+}
+
+// UpdateConfig replaces a remote config's value and description. A read-scoped
+// key receives insufficient_scope here (surfaced via the error).
+func (c *Client) UpdateConfig(configID string, req UpdateConfigRequest) (*Config, error) {
+	data, status, err := c.do("PUT", "/v1/configs/"+configID, req)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("update config failed (%d): %s", status, string(data))
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}

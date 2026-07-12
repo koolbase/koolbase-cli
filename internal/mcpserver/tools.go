@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -20,6 +21,8 @@ func (s *Server) registerTools() {
 	s.addListEnvironments()
 	s.addListFlags()
 	s.addSetFlag()
+	s.addListConfigs()
+	s.addSetConfig()
 }
 
 // --- whoami -----------------------------------------------------------------
@@ -193,11 +196,11 @@ func (s *Server) addListEnvironments() {
 // --- set_flag (first write tool) --------------------------------------------
 
 type setFlagIn struct {
-	EnvironmentID     string `json:"environment_id" jsonschema:"UUID of the environment the flag belongs to"`
-	FlagID            string `json:"flag_id" jsonschema:"UUID of the flag to update (from koolbase_list_flags)"`
-	Enabled           *bool  `json:"enabled,omitempty" jsonschema:"if set, turn the flag on or off; omit to leave unchanged"`
-	RolloutPercentage *int   `json:"rollout_percentage,omitempty" jsonschema:"if set, target rollout 0-100; omit to leave unchanged"`
-	KillSwitch        *bool  `json:"kill_switch,omitempty" jsonschema:"if set, engage or release the kill switch; omit to leave unchanged"`
+	EnvironmentID     string  `json:"environment_id" jsonschema:"UUID of the environment the flag belongs to"`
+	FlagID            string  `json:"flag_id" jsonschema:"UUID of the flag to update (from koolbase_list_flags)"`
+	Enabled           *bool   `json:"enabled,omitempty" jsonschema:"if set, turn the flag on or off; omit to leave unchanged"`
+	RolloutPercentage *int    `json:"rollout_percentage,omitempty" jsonschema:"if set, target rollout 0-100; omit to leave unchanged"`
+	KillSwitch        *bool   `json:"kill_switch,omitempty" jsonschema:"if set, engage or release the kill switch; omit to leave unchanged"`
 	Description       *string `json:"description,omitempty" jsonschema:"if set, replace the description; omit to leave unchanged"`
 }
 
@@ -283,4 +286,123 @@ func mapScopeErr(err error) error {
 			"Mint a write-scoped key in the Koolbase dashboard and set KOOLBASE_API_KEY to it")
 	}
 	return err
+}
+
+// decodeJSON turns a json.RawMessage into a plain any (string, float64, bool,
+// map, or slice) so it serializes as its real JSON value rather than raw
+// bytes. On malformed input it returns nil rather than failing the tool.
+func decodeJSON(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
+// --- list_configs -----------------------------------------------------------
+
+type listConfigsIn struct {
+	EnvironmentID string `json:"environment_id" jsonschema:"UUID of the environment whose remote configs to list"`
+}
+
+type configSummary struct {
+	ID          string          `json:"id"`
+	Key         string          `json:"key" jsonschema:"the config's programmatic key"`
+	Value       any             `json:"value" jsonschema:"current value (string, number, boolean, or object per value_type)"`
+	ValueType   string          `json:"value_type" jsonschema:"string, number, boolean, or json"`
+	Description string          `json:"description"`
+}
+
+type listConfigsOut struct {
+	Configs []configSummary `json:"configs"`
+}
+
+func (s *Server) addListConfigs() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name:        "koolbase_list_configs",
+		Description: "List the remote-config entries of a Koolbase environment, with their current values and types. Remote config lets you change app behavior/content without shipping an app update.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listConfigsIn) (*mcp.CallToolResult, listConfigsOut, error) {
+		configs, err := s.client.ListConfigs(in.EnvironmentID)
+		if err != nil {
+			return nil, listConfigsOut{}, mapScopeErr(err)
+		}
+		out := listConfigsOut{Configs: make([]configSummary, 0, len(configs))}
+		for _, c := range configs {
+			out.Configs = append(out.Configs, configSummary{
+				ID: c.ID, Key: c.Key, Value: decodeJSON(c.Value),
+				ValueType: c.ValueType, Description: c.Description,
+			})
+		}
+		return nil, out, nil
+	})
+}
+
+// --- set_config -------------------------------------------------------------
+
+type setConfigIn struct {
+	EnvironmentID string  `json:"environment_id" jsonschema:"UUID of the environment the config belongs to"`
+	ConfigID      string  `json:"config_id" jsonschema:"UUID of the config to update (from koolbase_list_configs)"`
+	Value         *string `json:"value,omitempty" jsonschema:"if set, the new value as a JSON literal matching the config's type: a quoted string like \"hello\", a number like 42, a boolean true/false, or a JSON object/array. Omit to leave unchanged."`
+	Description   *string `json:"description,omitempty" jsonschema:"if set, replace the description; omit to leave unchanged"`
+}
+
+type setConfigOut struct {
+	ID          string `json:"id"`
+	Key         string `json:"key"`
+	Value       any    `json:"value"`
+	ValueType   string `json:"value_type"`
+	Description string `json:"description"`
+}
+
+func (s *Server) addSetConfig() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_set_config",
+		Description: "Update a Koolbase remote-config value or description. Only fields you provide change; others keep current values. " +
+			"The value must be a JSON literal matching the config's value_type (string/number/boolean/json) — the server rejects a type mismatch. " +
+			"This changes live app behavior/content for users on this environment. Requires a write-scoped API key.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setConfigIn) (*mcp.CallToolResult, setConfigOut, error) {
+		configs, err := s.client.ListConfigs(in.EnvironmentID)
+		if err != nil {
+			return nil, setConfigOut{}, mapScopeErr(err)
+		}
+		var cur *api.Config
+		for i := range configs {
+			if configs[i].ID == in.ConfigID {
+				cur = &configs[i]
+				break
+			}
+		}
+		if cur == nil {
+			return nil, setConfigOut{}, fmt.Errorf("config %s not found in environment %s", in.ConfigID, in.EnvironmentID)
+		}
+
+		req := api.UpdateConfigRequest{
+			Value:       cur.Value,
+			Description: cur.Description,
+		}
+		if in.Value != nil {
+			// Validate the caller's value is well-formed JSON before sending;
+			// the server additionally checks it against the config's type.
+			raw := json.RawMessage(*in.Value)
+			if !json.Valid(raw) {
+				return nil, setConfigOut{}, fmt.Errorf("value is not valid JSON: %q — use a JSON literal like \"text\", 42, true, or {\"k\":\"v\"}", *in.Value)
+			}
+			req.Value = raw
+		}
+		if in.Description != nil {
+			req.Description = *in.Description
+		}
+
+		updated, err := s.client.UpdateConfig(in.ConfigID, req)
+		if err != nil {
+			return nil, setConfigOut{}, mapScopeErr(err)
+		}
+		return nil, setConfigOut{
+			ID: updated.ID, Key: updated.Key, Value: decodeJSON(updated.Value),
+			ValueType: updated.ValueType, Description: updated.Description,
+		}, nil
+	})
 }
