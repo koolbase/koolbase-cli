@@ -43,7 +43,7 @@ SHA-256 digest with the engine signing key, uploads it to R2 via a presigned
 URL, registers it, and publishes it.
 
 Requires the internal API key in the environment:
-  export KOOLBASE_INTERNAL_KEY=$(doppler secrets get INTERNAL_API_KEY --plain --config prd)
+  export KOOLBASE_INTERNAL_KEY=<internal publish key>
 
 Example:
   koolbase engine publish --flutter-version 3.44.0 \
@@ -66,7 +66,7 @@ func runEnginePublish(cmd *cobra.Command, args []string) error {
 	internalKey := os.Getenv("KOOLBASE_INTERNAL_KEY")
 	if internalKey == "" && !pubPackOnly {
 		return fmt.Errorf("KOOLBASE_INTERNAL_KEY is not set\n" +
-			"  export KOOLBASE_INTERNAL_KEY=$(doppler secrets get INTERNAL_API_KEY --plain --config prd --project <your-project>)")
+			"  this command is for Koolbase engine maintainers and requires the internal publish key")
 	}
 	if pubFlutterVersion == "" {
 		return fmt.Errorf("--flutter-version is required (e.g. 3.44.0)")
