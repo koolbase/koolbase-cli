@@ -17,6 +17,7 @@ package mcpserver
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,6 +30,14 @@ var Version = "dev"
 type Server struct {
 	mcp    *mcp.Server
 	client *api.Client
+
+	// orgID is the organization the configured key/session acts in, resolved
+	// lazily via whoami and cached. Tools that address org-scoped endpoints
+	// (e.g. list_projects) read it through orgOnce so the agent never has to
+	// supply an org it can't see beyond anyway.
+	orgOnce sync.Once
+	orgID   string
+	orgErr  error
 }
 
 // New constructs the Koolbase MCP server and registers all tools.
@@ -43,6 +52,22 @@ func New(client *api.Client) *Server {
 	}
 	s.registerTools()
 	return s
+}
+
+// org resolves and caches the caller's organization ID via whoami. The first
+// call performs the lookup; subsequent calls return the cached value. Errors
+// are cached too, so a broken key surfaces the same clear message every time
+// rather than hammering the API.
+func (s *Server) org() (string, error) {
+	s.orgOnce.Do(func() {
+		w, err := s.client.Whoami()
+		if err != nil {
+			s.orgErr = err
+			return
+		}
+		s.orgID = w.OrgID
+	})
+	return s.orgID, s.orgErr
 }
 
 // Run serves MCP over stdio until the client disconnects or ctx is cancelled.
