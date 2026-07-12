@@ -133,7 +133,9 @@ var patchIosCmd = &cobra.Command{
 		}
 
 		allowUnsafe, _ := cmd.Flags().GetBool("allow-unsafe")
-		if !allowUnsafe {
+		// Fence applies on the pack path (--bytecode). The --kbpi wrap path
+		// carries a container already fenced by `patch ios build`.
+		if !allowUnsafe && kbpiPath == "" {
 			bc, rerr := os.ReadFile(bytecodePath)
 			if rerr != nil {
 				return fmt.Errorf("read bytecode for safety check: %w", rerr)
