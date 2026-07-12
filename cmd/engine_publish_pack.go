@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -114,6 +115,25 @@ func packLeanEngineIOS(engineSrcOut, stageDir, version string) error {
 	if err := copyTree(filepath.Join(hostSrc, "dart-sdk"), filepath.Join(hostDst, "dart-sdk")); err != nil {
 		return fmt.Errorf("host dart-sdk: %w", err)
 	}
+	// Pin a version-matched dartaotruntime for the dart2bytecode snapshot under a
+	// stable name (dartaotruntime_d2b) so `koolbase patch ios build` has a
+	// deterministic authoring runtime (active dartaotruntime is a different
+	// lineage than the product-mode dart2bytecode snapshot — they mismatch).
+	if err := packMatchedD2bRuntime(hostDst); err != nil {
+		return fmt.Errorf("dart2bytecode runtime: %w", err)
+	}
+
+	// Ship a version-matched dartaotruntime for the dart2bytecode snapshot, under
+	// a stable name (dartaotruntime_d2b). The active dartaotruntime is 03b425
+	// (built lineage) but dart2bytecode.dart.snapshot is ace654 (product/stock
+	// lineage, force_product_mode in BUILD.gn) — they version-mismatch. The
+	// consistent pair (ace654 runtime) rides in as a .bak; here we pick the
+	// runtime that actually runs the snapshot and pin it under a clean name so
+	// `koolbase patch ios build` has a deterministic, matched authoring runtime.
+	if err := packMatchedD2bRuntime(hostDst); err != nil {
+		return fmt.Errorf("dart2bytecode runtime: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Join(hostDst, "gen"), 0o755); err != nil {
 		return err
 	}
@@ -250,4 +270,33 @@ func zipDir(parentDir, topEntry, zipPath string) error {
 		_, err = io.Copy(w, f)
 		return err
 	})
+}
+
+// packMatchedD2bRuntime finds the dartaotruntime that matches the shipped
+// dart2bytecode snapshot and copies it to dart-sdk/bin/dartaotruntime_d2b — a
+// stable, matched name the authoring command uses. The active dartaotruntime is
+// a different lineage (03b425, built) than the product-mode dart2bytecode
+// snapshot (ace654, force_product_mode in BUILD.gn), so they version-mismatch;
+// the consistent runtime rides in as a .bak. Candidates: active runtime, then
+// any .bak. A match runs the snapshot's --help without a version error.
+func packMatchedD2bRuntime(hostDst string) error {
+	binDir := filepath.Join(hostDst, "dart-sdk", "bin")
+	snap := filepath.Join(binDir, "snapshots", "dart2bytecode.dart.snapshot")
+	if _, err := os.Stat(snap); err != nil {
+		return fmt.Errorf("dart2bytecode snapshot missing: %s", snap)
+	}
+	candidates := []string{filepath.Join(binDir, "dartaotruntime")}
+	if baks, _ := filepath.Glob(filepath.Join(binDir, "dartaotruntime.*.bak")); len(baks) > 0 {
+		candidates = append(candidates, baks...)
+	}
+	for _, rt := range candidates {
+		if _, err := os.Stat(rt); err != nil {
+			continue
+		}
+		if err := exec.Command(rt, snap, "--help").Run(); err == nil {
+			dst := filepath.Join(binDir, "dartaotruntime_d2b")
+			return copyFile(rt, dst)
+		}
+	}
+	return fmt.Errorf("no dartaotruntime matches dart2bytecode.dart.snapshot in %s", binDir)
 }

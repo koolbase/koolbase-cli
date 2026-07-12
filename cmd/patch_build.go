@@ -372,6 +372,7 @@ func appBundleRoot(binaryPath string) (string, error) {
 	}
 	return "", fmt.Errorf("no enclosing .app bundle found for %s", binaryPath)
 }
+
 // buildKBPIPatch mints a signed kind=5 patch: a 128-byte KBPM header plus the
 // KBPI container as payload. Mirrors buildWholeBlobReplacePatch (kind=3): the
 // payload is bound to the signed header via SHA-256(payload)[0:16], and build_id
