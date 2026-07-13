@@ -20,11 +20,12 @@ import (
 	"sync"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
+	"github.com/kennedyowusu/koolbase-cli/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Version is stamped by the CLI build; fallback for dev builds.
-var Version = "dev"
+// Version reports the CLI-wide version (see internal/version).
+var Version = version.Version
 
 // Server wraps the MCP server with the Koolbase API client all tools share.
 type Server struct {
