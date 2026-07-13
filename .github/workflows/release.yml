@@ -97,4 +97,6 @@ jobs:
           aws s3 cp dist/checksums.txt "${BUCKET}/checksums.txt" --endpoint-url "$R2_ENDPOINT"
           aws s3 cp dist/latest.json "${BUCKET}/latest.json" \
             --content-type application/json --endpoint-url "$R2_ENDPOINT"
+          aws s3 cp install.sh "${BUCKET}/install.sh" \
+            --content-type text/x-shellscript --endpoint-url "$R2_ENDPOINT"
           echo "published ${VERSION}"
