@@ -159,6 +159,35 @@ func (c *Client) Login(email, password string) (*LoginResponse, error) {
 	return &resp, nil
 }
 
+// oauthLoginRequest is the payload for POST /v1/auth/oauth. For Google, the
+// server verifies id_token against Google's JWKS and derives the email from
+// the verified claims — the client-supplied fields are advisory only.
+type oauthLoginRequest struct {
+	Provider string `json:"provider"`
+	IDToken  string `json:"id_token"`
+}
+
+// LoginWithGoogle exchanges a Google id_token (obtained via the browser OAuth
+// flow) for a Koolbase session. The API verifies the token server-side; a
+// failed verification returns 401 invalid_oauth_token.
+func (c *Client) LoginWithGoogle(idToken string) (*LoginResponse, error) {
+	data, status, err := c.do("POST", "/v1/auth/oauth", oauthLoginRequest{
+		Provider: "google",
+		IDToken:  idToken,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("google login failed: %s", resp.Error)
+	}
+	return &resp, nil
+}
+
 // ─── Projects ──────────────────────────────────────────────────────────────
 
 type Project struct {
