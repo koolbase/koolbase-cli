@@ -294,7 +294,7 @@ func mapScopeErr(err error) error {
 			required = "admin"
 		}
 		return fmt.Errorf("this API key's scope is insufficient for this operation (requires %s). "+
-			"Mint a %s-scoped key (koolbase keys create --scope %s, or the dashboard's API Keys tab) "+
+			"Mint a key with scope %s (koolbase keys create --scope %s, or the dashboard's API Keys tab) "+
 			"and set KOOLBASE_API_KEY to it", required, required, required)
 	}
 	return err
