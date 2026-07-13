@@ -1576,3 +1576,65 @@ func (c *Client) GetReleaseBaseDownloadURL(appID, releaseID string) (*BaseDownlo
 	}
 	return &resp, nil
 }
+
+// --- organization API keys ---------------------------------------------------
+
+type OrgKey struct {
+	ID         string  `json:"id"`
+	OrgID      string  `json:"org_id"`
+	Name       string  `json:"name"`
+	KeyPrefix  string  `json:"key_prefix"`
+	Scope      string  `json:"scope"`
+	CreatedAt  string  `json:"created_at"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+	RevokedAt  *string `json:"revoked_at,omitempty"`
+}
+
+type MintKeyResponse struct {
+	Key    OrgKey `json:"key"`
+	Secret string `json:"secret"`
+}
+
+// MintKey creates an org API key. Session auth required — the server
+// rejects key-authenticated minting (keys cannot mint keys).
+func (c *Client) MintKey(orgID, name, scope string) (*MintKeyResponse, error) {
+	data, status, err := c.do("POST", fmt.Sprintf("/v1/organizations/%s/api-keys", orgID),
+		map[string]string{"name": name, "scope": scope})
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return nil, fmt.Errorf("mint key failed (%d): %s", status, string(data))
+	}
+	var out MintKeyResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) ListKeys(orgID string) ([]OrgKey, error) {
+	data, status, err := c.do("GET", fmt.Sprintf("/v1/organizations/%s/api-keys", orgID), nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("list keys failed (%d): %s", status, string(data))
+	}
+	var out []OrgKey
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) RevokeKey(orgID, keyID string) error {
+	data, status, err := c.do("DELETE", fmt.Sprintf("/v1/organizations/%s/api-keys/%s", orgID, keyID), nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK && status != http.StatusNoContent {
+		return fmt.Errorf("revoke key failed (%d): %s", status, string(data))
+	}
+	return nil
+}
