@@ -48,7 +48,7 @@ VERSION=$(printf '%s' "$MANIFEST" | tr -d ' \n' | sed -n 's|.*"version":"\([^"]*
 
 [ -n "$URL" ] && [ -n "$SHA" ] || die "no artifact for platform ${PLATFORM} in manifest"
 
-say "Installing Koolbase CLI ${VERSION} (${PLATFORM})"
+say "Installing Koolbase CLI ${VERSION} (${OS}/${ARCH})"
 
 # --- download + verify -------------------------------------------------------
 TMP=$(mktemp -d)
