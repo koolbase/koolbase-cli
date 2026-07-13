@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
@@ -288,8 +289,13 @@ func mapScopeErr(err error) error {
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "insufficient_scope") || strings.Contains(msg, "(403)") {
-		return fmt.Errorf("this API key lacks write permission for this operation. " +
-			"Mint a write-scoped key in the Koolbase dashboard and set KOOLBASE_API_KEY to it")
+		required := "write"
+		if strings.Contains(msg, "requires admin") {
+			required = "admin"
+		}
+		return fmt.Errorf("this API key's scope is insufficient for this operation (requires %s). "+
+			"Mint a %s-scoped key (koolbase keys create --scope %s, or the dashboard's API Keys tab) "+
+			"and set KOOLBASE_API_KEY to it", required, required, required)
 	}
 	return err
 }
@@ -536,19 +542,30 @@ type patchActionOut struct {
 // patchState re-reads a patch after a mutation so the tool reports verified
 // state, not the mutation's own claim.
 func (s *Server) patchState(projectID, patchID string) (patchActionOut, error) {
-	patches, err := s.client.ListPatches(projectID, "")
-	if err != nil {
-		return patchActionOut{}, err
-	}
-	for _, p := range patches {
-		if p.ID == patchID {
-			return patchActionOut{
-				PatchID: p.ID, Status: p.Status,
-				RolloutPercentage: p.RolloutPercentage, Mandatory: p.Mandatory,
-			}, nil
+	// One bounded retry: the re-read races the mutation's commit path, and a
+	// transient 404/miss milliseconds after a successful mutation is noise,
+	// not truth (observed live on the first recall proof).
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
+		patches, err := s.client.ListPatches(projectID, "")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, p := range patches {
+			if p.ID == patchID {
+				return patchActionOut{
+					PatchID: p.ID, Status: p.Status,
+					RolloutPercentage: p.RolloutPercentage, Mandatory: p.Mandatory,
+				}, nil
+			}
+		}
+		lastErr = fmt.Errorf("patch %s not in listing", patchID)
 	}
-	return patchActionOut{}, fmt.Errorf("patch %s not found after action", patchID)
+	return patchActionOut{}, fmt.Errorf("state re-read failed after retries: %w", lastErr)
 }
 
 func (s *Server) addPublishPatch() {
