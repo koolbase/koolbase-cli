@@ -39,10 +39,19 @@ type Server struct {
 	orgOnce sync.Once
 	orgID   string
 	orgErr  error
+	opts   Options
+}
+
+// Options gates optional tool families. Zero value = safe defaults.
+type Options struct {
+	// EnableCodepushMutations registers publish/recall patch tools.
+	// Off by default: these change running apps on real devices, so the
+	// operator must opt in per server instance (--enable-codepush-mutations).
+	EnableCodepushMutations bool
 }
 
 // New constructs the Koolbase MCP server and registers all tools.
-func New(client *api.Client) *Server {
+func New(client *api.Client, opts Options) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "koolbase",
@@ -50,6 +59,7 @@ func New(client *api.Client) *Server {
 			Version: Version,
 		}, nil),
 		client: client,
+		opts:   opts,
 	}
 	s.registerTools()
 	return s

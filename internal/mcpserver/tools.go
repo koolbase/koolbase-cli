@@ -25,6 +25,10 @@ func (s *Server) registerTools() {
 	s.addListConfigs()
 	s.addSetConfig()
 	s.addListPatches()
+	if s.opts.EnableCodepushMutations {
+		s.addPublishPatch()
+		s.addRecallPatch()
+	}
 }
 
 // --- whoami -----------------------------------------------------------------
@@ -509,6 +513,82 @@ func (s *Server) addListPatches() {
 					CreatedAt: p.CreatedAt, PublishedAt: p.PublishedAt, RecalledAt: p.RecalledAt,
 				})
 			}
+		}
+		return nil, out, nil
+	})
+}
+
+
+// --- publish_patch / recall_patch (gated: --enable-codepush-mutations) ------
+
+type publishPatchIn struct {
+	ProjectID string `json:"project_id" jsonschema:"UUID of the project (app) the patch belongs to"`
+	PatchID   string `json:"patch_id" jsonschema:"ID of the DRAFT patch to publish (from koolbase_list_patches)"`
+}
+
+type patchActionOut struct {
+	PatchID           string `json:"patch_id"`
+	Status            string `json:"status"`
+	RolloutPercentage int    `json:"rollout_percentage" jsonschema:"the blast radius: percentage of devices that will receive this patch"`
+	Mandatory         bool   `json:"mandatory"`
+}
+
+// patchState re-reads a patch after a mutation so the tool reports verified
+// state, not the mutation's own claim.
+func (s *Server) patchState(projectID, patchID string) (patchActionOut, error) {
+	patches, err := s.client.ListPatches(projectID, "")
+	if err != nil {
+		return patchActionOut{}, err
+	}
+	for _, p := range patches {
+		if p.ID == patchID {
+			return patchActionOut{
+				PatchID: p.ID, Status: p.Status,
+				RolloutPercentage: p.RolloutPercentage, Mandatory: p.Mandatory,
+			}, nil
+		}
+	}
+	return patchActionOut{}, fmt.Errorf("patch %s not found after action", patchID)
+}
+
+func (s *Server) addPublishPatch() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_publish_patch",
+		Description: "PUBLISH a draft code-push patch, making it LIVE: real devices download and " +
+			"apply it on their next check. The patch ships at the rollout percentage fixed when it " +
+			"was created (returned in the result — inspect it via koolbase_list_patches BEFORE " +
+			"publishing and confirm the blast radius with the user). Requires an admin-scoped key. " +
+			"If anything looks wrong after publishing, koolbase_recall_patch is the emergency brake.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in publishPatchIn) (*mcp.CallToolResult, patchActionOut, error) {
+		if err := s.client.PublishPatch(in.ProjectID, in.PatchID); err != nil {
+			return nil, patchActionOut{}, mapScopeErr(err)
+		}
+		out, err := s.patchState(in.ProjectID, in.PatchID)
+		if err != nil {
+			return nil, patchActionOut{}, fmt.Errorf("published, but state re-read failed: %w", err)
+		}
+		return nil, out, nil
+	})
+}
+
+type recallPatchIn struct {
+	ProjectID string `json:"project_id" jsonschema:"UUID of the project (app) the patch belongs to"`
+	PatchID   string `json:"patch_id" jsonschema:"ID of the published patch to recall"`
+}
+
+func (s *Server) addRecallPatch() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_recall_patch",
+		Description: "RECALL a published code-push patch: devices revert to the prior patch on " +
+			"their next cold launch. This is the emergency brake — use it immediately when a live " +
+			"patch is misbehaving. Requires an admin-scoped key.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in recallPatchIn) (*mcp.CallToolResult, patchActionOut, error) {
+		if err := s.client.RecallPatch(in.ProjectID, in.PatchID); err != nil {
+			return nil, patchActionOut{}, mapScopeErr(err)
+		}
+		out, err := s.patchState(in.ProjectID, in.PatchID)
+		if err != nil {
+			return nil, patchActionOut{}, fmt.Errorf("recalled, but state re-read failed: %w", err)
 		}
 		return nil, out, nil
 	})

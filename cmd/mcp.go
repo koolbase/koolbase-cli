@@ -70,8 +70,13 @@ var mcpServeCmd = &cobra.Command{
 
 		// Diagnostics to stderr only — stdout belongs to the protocol.
 		fmt.Fprintln(os.Stderr, "koolbase mcp: serving over stdio")
+		if mcpEnableCodepushMutations {
+			fmt.Fprintln(os.Stderr, "koolbase mcp: code-push mutation tools ENABLED (publish/recall)")
+		}
 
-		srv := mcpserver.New(client)
+		srv := mcpserver.New(client, mcpserver.Options{
+			EnableCodepushMutations: mcpEnableCodepushMutations,
+		})
 		if err := srv.Run(ctx); err != nil && ctx.Err() == nil {
 			return fmt.Errorf("mcp server: %w", err)
 		}
@@ -79,7 +84,11 @@ var mcpServeCmd = &cobra.Command{
 	},
 }
 
+var mcpEnableCodepushMutations bool
+
 func init() {
+	mcpServeCmd.Flags().BoolVar(&mcpEnableCodepushMutations, "enable-codepush-mutations", false,
+		"Register the code-push publish/recall tools (admin-scoped, production-affecting; off by default)")
 	mcpCmd.AddCommand(mcpServeCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
