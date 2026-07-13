@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -310,11 +311,11 @@ type listConfigsIn struct {
 }
 
 type configSummary struct {
-	ID          string          `json:"id"`
-	Key         string          `json:"key" jsonschema:"the config's programmatic key"`
-	Value       any             `json:"value" jsonschema:"current value (string, number, boolean, or object per value_type)"`
-	ValueType   string          `json:"value_type" jsonschema:"string, number, boolean, or json"`
-	Description string          `json:"description"`
+	ID          string `json:"id"`
+	Key         string `json:"key" jsonschema:"the config's programmatic key"`
+	Value       any    `json:"value" jsonschema:"current value (string, number, boolean, or object per value_type)"`
+	ValueType   string `json:"value_type" jsonschema:"string, number, boolean, or json"`
+	Description string `json:"description"`
 }
 
 type listConfigsOut struct {
@@ -322,9 +323,20 @@ type listConfigsOut struct {
 }
 
 func (s *Server) addListConfigs() {
+	// The Value field is `any`; the SDK infers it as the boolean `true`
+	// schema, which Claude Desktop's validator rejects (dropping ALL tools).
+	// Build the schema ourselves and force an object-form accept-anything
+	// schema for `value`.
+	outSchema, serr := jsonschema.For[listConfigsOut](nil)
+	if serr == nil && outSchema.Properties["configs"] != nil && outSchema.Properties["configs"].Items != nil {
+		outSchema.Properties["configs"].Items.Properties["value"] = &jsonschema.Schema{
+			Description: "current value (string, number, boolean, or object per value_type)",
+		}
+	}
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "koolbase_list_configs",
-		Description: "List the remote-config entries of a Koolbase environment, with their current values and types. Remote config lets you change app behavior/content without shipping an app update.",
+		Name:         "koolbase_list_configs",
+		Description:  "List the remote-config entries of a Koolbase environment, with their current values and types. Remote config lets you change app behavior/content without shipping an app update.",
+		OutputSchema: outSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listConfigsIn) (*mcp.CallToolResult, listConfigsOut, error) {
 		configs, err := s.client.ListConfigs(in.EnvironmentID)
 		if err != nil {
@@ -359,8 +371,17 @@ type setConfigOut struct {
 }
 
 func (s *Server) addSetConfig() {
+	// Same `any`-typed Value as list_configs: force an object-form schema
+	// so Claude Desktop's validator accepts the manifest.
+	outSchema, serr := jsonschema.For[setConfigOut](nil)
+	if serr == nil && outSchema.Properties != nil {
+		outSchema.Properties["value"] = &jsonschema.Schema{
+			Description: "the config's value after the update",
+		}
+	}
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "koolbase_set_config",
+		OutputSchema: outSchema,
 		Description: "Update a Koolbase remote-config value or description. Only fields you provide change; others keep current values. " +
 			"The value must be a JSON literal matching the config's value_type (string/number/boolean/json) — the server rejects a type mismatch. " +
 			"This changes live app behavior/content for users on this environment. Requires a write-scoped API key.",
