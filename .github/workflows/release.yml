@@ -1,0 +1,100 @@
+name: Release
+
+# Builds cross-platform CLI binaries on version tags and publishes them to
+# the koolbase-cli-releases R2 bucket behind get.koolbase.com.
+#
+# Layout produced in the bucket:
+#   releases/vX.Y.Z/koolbase-<os>-<arch>   (immutable, versioned history)
+#   koolbase-<os>-<arch>                   (latest pointer, overwritten)
+#   releases/vX.Y.Z/checksums.txt
+#   checksums.txt
+#   latest.json                            (installer entry point)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/kennedyowusu/koolbase-cli/internal/version.Version=${VERSION}"
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            out="dist/koolbase-${GOOS}-${GOARCH}"
+            echo "building ${out}"
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags "$LDFLAGS" -o "$out" .
+          done
+
+      - name: Checksums and manifest
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum koolbase-* > checksums.txt
+          cat checksums.txt
+          python3 - << 'PYEOF'
+          import json, os, datetime
+          version = os.environ["VERSION"]
+          sums = {}
+          for line in open("checksums.txt"):
+              digest, name = line.split()
+              sums[name.replace("koolbase-", "", 1)] = digest
+          manifest = {
+              "version": version,
+              "released_at": datetime.datetime.now(datetime.timezone.utc)
+                  .isoformat(timespec="seconds"),
+              "minimum_server_version": None,
+              "artifacts": {
+                  plat: {
+                      "url": f"https://get.koolbase.com/releases/{version}/koolbase-{plat}",
+                      "sha256": digest,
+                  }
+                  for plat, digest in sums.items()
+              },
+          }
+          with open("latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(open("latest.json").read())
+          PYEOF
+
+      - name: Upload to R2
+        env:
+          VERSION: ${{ github.ref_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          BUCKET="s3://koolbase-cli-releases"
+          # Immutable versioned copies first, latest pointers second, and
+          # latest.json last — an installer racing the upload never sees a
+          # manifest pointing at artifacts that aren't there yet.
+          aws s3 cp dist/ "${BUCKET}/releases/${VERSION}/" --recursive \
+            --exclude latest.json --endpoint-url "$R2_ENDPOINT"
+          for f in dist/koolbase-*; do
+            aws s3 cp "$f" "${BUCKET}/$(basename "$f")" --endpoint-url "$R2_ENDPOINT"
+          done
+          aws s3 cp dist/checksums.txt "${BUCKET}/checksums.txt" --endpoint-url "$R2_ENDPOINT"
+          aws s3 cp dist/latest.json "${BUCKET}/latest.json" \
+            --content-type application/json --endpoint-url "$R2_ENDPOINT"
+          echo "published ${VERSION}"
