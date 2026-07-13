@@ -308,6 +308,9 @@ func runRelease(cmd *cobra.Command, args []string) error {
 		fmt.Println("  This AAB is UNPATCHABLE — Code Push cannot serve patches to these build_ids.")
 	} else {
 		appVersion := readPubspecVersion(projectDir)
+		if appVersion == "" {
+			fmt.Fprintln(os.Stderr, "  ⚠ registering releases without app_version — no version: found in pubspec.yaml; clients can't gate patches by store version")
+		}
 		apiClient := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		// Same fingerprint for every ABI (identical flag set); computed once.
 		buildConfig := buildFingerprint(releaseFlavor, releaseDartDefines, releaseDartDefineFromFiles, passthrough)
