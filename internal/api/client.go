@@ -74,8 +74,13 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) 
 				Code  string `json:"code"`
 				Error string `json:"error"`
 			}
-			if json.Unmarshal(data, &body) == nil && body.Code == "insufficient_scope" {
-				return data, resp.StatusCode, fmt.Errorf("insufficient_scope: %s", body.Error)
+			if json.Unmarshal(data, &body) == nil {
+				switch body.Code {
+				case "insufficient_scope":
+					return data, resp.StatusCode, fmt.Errorf("insufficient_scope: %s", body.Error)
+				case "oauth_only_account":
+					return data, resp.StatusCode, fmt.Errorf("this account uses Google or Apple sign-in and has no password.\nSet a CLI password in dashboard settings (Account → Password), or authenticate with an API key instead")
+				}
 			}
 		}
 		return data, resp.StatusCode, authError(resp.StatusCode)
