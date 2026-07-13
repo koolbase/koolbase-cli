@@ -123,6 +123,16 @@ var patchPushIOSCmd = &cobra.Command{
 			if matchMode == "build_id" && buildID == "" {
 				return fmt.Errorf("--build-id is required for build_id mode (from koolbaseBuildId() on device)")
 			}
+			// app_version gates client compatibility; in build_id mode the flag
+			// is optional, so fall back to pubspec.yaml (mirrors koolbase
+			// release for Android) and warn if neither is available.
+			if appVersion == "" {
+				if appVersion = readPubspecVersion("."); appVersion != "" {
+					fmt.Printf("  ✓ app_version %s (from pubspec.yaml)\n", appVersion)
+				} else {
+					fmt.Fprintln(os.Stderr, "  ⚠ registering release without app_version — pass --app-version or run from the app directory (pubspec.yaml)")
+				}
+			}
 			rel, rerr := client.CreateRelease(appID, api.CreateReleaseRequest{
 				BuildID:        buildID,
 				Platform:       "ios",

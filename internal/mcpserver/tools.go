@@ -463,15 +463,26 @@ func (s *Server) addListPatches() {
 		Description: "List code-push (OTA) patches for a Koolbase app, with their status (draft/published/recalled), rollout percentage, and target build. " +
 			"Omit release_id to see patches across all releases. Read-only — does not publish or recall anything.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listPatchesIn) (*mcp.CallToolResult, listPatchesOut, error) {
-		// Resolve which releases to scan: one, or all for the app.
+		// Resolve which releases to scan: one, or all for the app. Always
+		// fetch real release records (no GetRelease endpoint exists, so
+		// filter the list) — a bare {ID} stub would leave build_id,
+		// platform, and app_version empty in the enrichment below.
+		rels, err := s.client.ListReleases(in.ProjectID)
+		if err != nil {
+			return nil, listPatchesOut{}, mapScopeErr(err)
+		}
 		var releases []api.Release
 		if in.ReleaseID != "" {
-			releases = []api.Release{{ID: in.ReleaseID}}
-		} else {
-			rels, err := s.client.ListReleases(in.ProjectID)
-			if err != nil {
-				return nil, listPatchesOut{}, mapScopeErr(err)
+			for _, r := range rels {
+				if r.ID == in.ReleaseID {
+					releases = append(releases, r)
+					break
+				}
 			}
+			if len(releases) == 0 {
+				return nil, listPatchesOut{}, fmt.Errorf("release %s not found in project %s", in.ReleaseID, in.ProjectID)
+			}
+		} else {
 			releases = rels
 		}
 
