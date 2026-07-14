@@ -32,11 +32,13 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.CLI_GOOGLE_CLIENT_SECRET }}
+          GH_CLIENT_SECRET: ${{ secrets.CLI_GITHUB_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           mkdir -p dist
           if [ -z "${GOOGLE_CLIENT_SECRET}" ]; then echo "ERROR: GOOGLE_CLIENT_SECRET not set — refusing to build a CLI with broken Google login"; exit 1; fi
-          LDFLAGS="-s -w -X github.com/kennedyowusu/koolbase-cli/internal/version.Version=${VERSION} -X github.com/kennedyowusu/koolbase-cli/cmd.googleClientSecret=${GOOGLE_CLIENT_SECRET}"
+          if [ -z "${GH_CLIENT_SECRET}" ]; then echo "ERROR: GH_CLIENT_SECRET not set — refusing to build a CLI with broken GitHub login"; exit 1; fi
+          LDFLAGS="-s -w -X github.com/kennedyowusu/koolbase-cli/internal/version.Version=${VERSION} -X github.com/kennedyowusu/koolbase-cli/cmd.googleClientSecret=${GOOGLE_CLIENT_SECRET} -X github.com/kennedyowusu/koolbase-cli/cmd.githubClientSecret=${GH_CLIENT_SECRET}"
           for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
             GOOS="${target%/*}"; GOARCH="${target#*/}"
             out="dist/koolbase-${GOOS}-${GOARCH}"
