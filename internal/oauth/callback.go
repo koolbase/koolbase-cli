@@ -115,7 +115,7 @@ func (cs *CallbackServer) Wait(ctx context.Context, timeout time.Duration) (stri
 	case res := <-cs.results:
 		return res.code, res.err
 	case <-time.After(timeout):
-		return "", fmt.Errorf("timed out waiting for browser authorization after %s", timeout)
+		return "", fmt.Errorf("timed out waiting for browser authorization after %s — run `koolbase login` to try again", timeout)
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
