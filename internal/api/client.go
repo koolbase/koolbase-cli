@@ -212,6 +212,42 @@ func (c *Client) LoginWithGitHub(accessToken string) (*LoginResponse, error) {
 	return &resp, nil
 }
 
+// connectIdentityRequest is the payload for POST /v1/auth/identities/connect.
+type connectIdentityRequest struct {
+	Provider string `json:"provider"`
+	Token    string `json:"token,omitempty"`
+	IDToken  string `json:"id_token,omitempty"`
+}
+
+// ConnectIdentity attaches a verified provider identity to the currently
+// authenticated account. Requires the client to be built with a valid session
+// (do() attaches it as the bearer token). For github the token is an access
+// token; for google it's an id_token.
+func (c *Client) ConnectIdentity(provider, token, idToken string) error {
+	data, status, err := c.do("POST", "/v1/auth/identities/connect", connectIdentityRequest{
+		Provider: provider,
+		Token:    token,
+		IDToken:  idToken,
+	})
+	if err != nil {
+		return err
+	}
+	if status == 200 {
+		return nil
+	}
+	// Surface the server's error code/message (e.g. provider_identity_already_linked).
+	var resp struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(data, &resp)
+	msg := resp.Error
+	if msg == "" {
+		msg = fmt.Sprintf("connect failed with status %d", status)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
 // ─── Projects ──────────────────────────────────────────────────────────────
 
 type Project struct {
