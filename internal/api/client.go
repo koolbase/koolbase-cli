@@ -212,6 +212,21 @@ func (c *Client) LoginWithGitHub(accessToken string) (*LoginResponse, error) {
 	return &resp, nil
 }
 
+// Logout invalidates the current session server-side. The client must be built
+// with the session token (do() attaches it). Best-effort: the caller clears
+// local config regardless of the result, so a failed/expired server logout
+// still logs the user out locally.
+func (c *Client) Logout() error {
+	_, status, err := c.do("POST", "/v1/auth/logout", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 204 {
+		return fmt.Errorf("logout failed with status %d", status)
+	}
+	return nil
+}
+
 // connectIdentityRequest is the payload for POST /v1/auth/identities/connect.
 type connectIdentityRequest struct {
 	Provider string `json:"provider"`
