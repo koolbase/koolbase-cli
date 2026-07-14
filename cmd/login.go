@@ -21,7 +21,13 @@ const googleClientID = "225474284307-v7ujjcealk7t5a1g3tblg52vsi6e3r0c.apps.googl
 
 var googleClientSecret string
 
+// GitHub OAuth app for the Koolbase CLI.
+const githubClientID = "Ov23liXTp5SuXHTUvgIk"
+
+var githubClientSecret string
+
 var loginUsePassword bool
+var loginUseGitHub bool
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
@@ -32,6 +38,9 @@ var loginCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if loginUsePassword {
 			return runPasswordLogin()
+		}
+		if loginUseGitHub {
+			return runGitHubLogin(cmd.Context())
 		}
 		return runGoogleLogin(cmd.Context())
 	},
@@ -67,6 +76,40 @@ func runGoogleLogin(ctx context.Context) error {
 	fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
 	return nil
 }
+
+// runGitHubLogin performs the browser-based GitHub OAuth flow: it opens
+// GitHub's consent screen, receives the redirect on a local loopback port, and
+// exchanges the result for a Koolbase session. GitHub is OAuth2 (not OIDC), so
+// the flow yields an access token the API verifies against GitHub's API.
+func runGitHubLogin(ctx context.Context) error {
+	fmt.Println("Opening your browser to sign in with GitHub...")
+
+	result, err := oauth.RunGitHub(ctx, oauth.GitHubConfig{
+		ClientID:     githubClientID,
+		ClientSecret: githubClientSecret,
+	}, func(url string) {
+		fmt.Printf("\nIf your browser didn't open, visit this URL to continue:\n\n%s\n\n", url)
+	})
+	if err != nil {
+		return fmt.Errorf("github sign-in failed: %w", err)
+	}
+
+	client := api.NewClient("", "")
+	resp, err := client.LoginWithGitHub(result.AccessToken)
+	if err != nil {
+		return err
+	}
+
+	if err := saveSession(resp); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n Logged in as %s\n", resp.User.Email)
+	fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
+	return nil
+}
+
+// runPasswordLogin performs the classic email + password login.
 
 // runPasswordLogin performs the classic email + password login. OAuth-only
 // accounts (no password) are surfaced with an actionable message by the API's
@@ -116,4 +159,5 @@ func saveSession(resp *api.LoginResponse) error {
 
 func init() {
 	loginCmd.Flags().BoolVar(&loginUsePassword, "password", false, "Sign in with email and password instead of Google")
+	loginCmd.Flags().BoolVar(&loginUseGitHub, "github", false, "Sign in with GitHub instead of Google")
 }

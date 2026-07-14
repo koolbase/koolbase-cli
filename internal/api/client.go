@@ -160,11 +160,13 @@ func (c *Client) Login(email, password string) (*LoginResponse, error) {
 }
 
 // oauthLoginRequest is the payload for POST /v1/auth/oauth. For Google, the
-// server verifies id_token against Google's JWKS and derives the email from
-// the verified claims — the client-supplied fields are advisory only.
+// server verifies id_token against Google's JWKS; for GitHub, it verifies the
+// access token by calling GitHub's API. Either way the email is derived from
+// the verified identity server-side — client-supplied fields are advisory.
 type oauthLoginRequest struct {
 	Provider string `json:"provider"`
-	IDToken  string `json:"id_token"`
+	IDToken  string `json:"id_token,omitempty"`
+	Token    string `json:"token,omitempty"`
 }
 
 // LoginWithGoogle exchanges a Google id_token (obtained via the browser OAuth
@@ -184,6 +186,28 @@ func (c *Client) LoginWithGoogle(idToken string) (*LoginResponse, error) {
 	}
 	if status != 200 {
 		return nil, fmt.Errorf("google login failed: %s", resp.Error)
+	}
+	return &resp, nil
+}
+
+// LoginWithGitHub exchanges a GitHub access token (obtained via the browser
+// OAuth flow) for a Koolbase session. The API verifies the token by resolving
+// the identity from GitHub's API; a failed verification returns 401
+// invalid_oauth_token.
+func (c *Client) LoginWithGitHub(accessToken string) (*LoginResponse, error) {
+	data, status, err := c.do("POST", "/v1/auth/oauth", oauthLoginRequest{
+		Provider: "github",
+		Token:    accessToken,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp LoginResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("github login failed: %s", resp.Error)
 	}
 	return &resp, nil
 }
