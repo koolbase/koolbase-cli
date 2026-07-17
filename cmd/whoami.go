@@ -27,7 +27,7 @@ var whoamiCmd = &cobra.Command{
 			fmt.Println("Not logged in. Run `koolbase login`.")
 			return nil
 		}
-		req, err := http.NewRequest("GET", cfg.BaseURL+"/v1/me", nil)
+		req, err := http.NewRequest("GET", cfg.BaseURL+"/v1/whoami", nil)
 		if err != nil {
 			return err
 		}
@@ -42,22 +42,36 @@ var whoamiCmd = &cobra.Command{
 			if cfg.Email != "" {
 				hint = fmt.Sprintf(" (last login: %s)", cfg.Email)
 			}
-			fmt.Printf("Session is invalid or expired%s. Run `koolbase login`.\n", hint)
+			fmt.Printf("Credentials rejected%s — the API key or session is invalid, expired, or revoked. Run `koolbase login` or set a valid KOOLBASE_API_KEY.\n", hint)
 			return nil
 		}
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("unexpected response %d from %s", resp.StatusCode, cfg.BaseURL)
 		}
 		body, _ := io.ReadAll(resp.Body)
-		var user struct {
-			Email string `json:"email"`
-			Role  string `json:"role"`
-			OrgID string `json:"org_id"`
+		var who struct {
+			Type    string `json:"type"`
+			OrgID   string `json:"org_id"`
+			OrgName string `json:"org_name"`
+			Email   string `json:"email"`
+			Role    string `json:"role"`
+			Scope   string `json:"scope"`
+			KeyID   string `json:"key_id"`
 		}
-		if err := json.Unmarshal(body, &user); err != nil || user.Email == "" {
+		if err := json.Unmarshal(body, &who); err != nil || who.Type == "" {
 			return fmt.Errorf("could not parse account info")
 		}
-		fmt.Printf("Logged in as %s (role: %s, org: %s)\n", user.Email, user.Role, user.OrgID)
+		org := who.OrgName
+		if org == "" {
+			org = who.OrgID
+		}
+		switch who.Type {
+		case "api_key":
+			fmt.Printf("Authenticated with an API key (scope: %s, org: %s)\n", who.Scope, org)
+			fmt.Printf("Key ID: %s\n", who.KeyID)
+		default:
+			fmt.Printf("Logged in as %s (role: %s, org: %s)\n", who.Email, who.Role, org)
+		}
 		fmt.Printf("API: %s\n", cfg.BaseURL)
 		return nil
 	},
