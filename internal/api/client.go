@@ -85,6 +85,23 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) 
 		}
 		return data, resp.StatusCode, authError(resp.StatusCode)
 	}
+
+	if resp.StatusCode == http.StatusConflict {
+		// A Google/GitHub login against an email that already has a
+		// password account. Re-running the browser flow won't help — the
+		// user needs their existing method. Name it, so email/password
+		// users aren't dead-ended (KB-6 dogfood finding).
+		var body struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(data, &body) == nil && body.Code == "account_exists" {
+			return data, resp.StatusCode, fmt.Errorf(
+				"an account with this email already uses email/password sign-in.\n" +
+					"Run `koolbase login --password` to sign in, then connect Google from dashboard settings if you want browser login")
+		}
+	}
+
 	if resp.StatusCode == http.StatusNotFound {
 		// The API answers 404 both for "doesn't exist" and "not yours"
 		// (deliberate: access checks don't confirm resource existence). Say
