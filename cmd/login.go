@@ -33,8 +33,9 @@ var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with your Koolbase account",
 	Long: "Authenticate with your Koolbase account.\n\n" +
-		"By default this opens your browser to sign in with Google.\n" +
-		"Use --password to sign in with an email and password instead.",
+		"Run without flags to choose a sign-in method interactively.\n" +
+		"Use --password for email and password, or --github for GitHub.\n" +
+		"In non-interactive contexts (CI, scripts) it defaults to Google.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if loginUsePassword {
 			return runPasswordLogin()
@@ -42,8 +43,42 @@ var loginCmd = &cobra.Command{
 		if loginUseGitHub {
 			return runGitHubLogin(cmd.Context())
 		}
+		// No flag given. Ask, but only when there's a human to answer: in CI or
+		// a script stdin isn't a TTY, and a blocking prompt would hang forever —
+		// fall back to the historical Google default there. (KB-6)
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			switch promptLoginMethod() {
+			case "github":
+				return runGitHubLogin(cmd.Context())
+			case "password":
+				return runPasswordLogin()
+			}
+		}
 		return runGoogleLogin(cmd.Context())
 	},
+}
+
+// promptLoginMethod asks which sign-in method to use when no flag was given.
+// Returns "google", "github", or "password". Only called when stdin is a
+// terminal — see RunE — so scripts and CI never block on a prompt. (KB-6)
+func promptLoginMethod() string {
+	fmt.Println("How would you like to sign in?")
+	fmt.Println("  1) Google       (opens your browser)")
+	fmt.Println("  2) GitHub       (opens your browser)")
+	fmt.Println("  3) Email + password")
+	fmt.Print("Choose [1-3, default 1]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+
+	switch strings.TrimSpace(line) {
+	case "2":
+		return "github"
+	case "3":
+		return "password"
+	default:
+		return "google"
+	}
 }
 
 // runGoogleLogin performs the browser-based OAuth flow: it opens Google's
