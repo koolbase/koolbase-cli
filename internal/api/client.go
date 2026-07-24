@@ -19,7 +19,17 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+	// longClient serves function invocations — the only calls whose duration
+	// is set by user code rather than our infrastructure. See invokeTimeout.
+	longClient *http.Client
 }
+
+// invokeTimeout bounds a function invocation. Derived, not arbitrary:
+// max function execution (30s, enforced at deploy) + Dart cold start
+// (~8s observed) + network headroom. The 30s default on httpClient is
+// deliberately unchanged — for control-plane calls, slow means broken
+// and failing fast is correct. If max execution changes, change this too.
+const invokeTimeout = 60 * time.Second
 
 func NewClient(baseURL, apiKey string) *Client {
 	if baseURL == "" {
@@ -31,10 +41,21 @@ func NewClient(baseURL, apiKey string) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		longClient: &http.Client{
+			Timeout: invokeTimeout,
+		},
 	}
 }
 
+// do executes a request on the default control-plane client (30s timeout).
 func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) {
+	return c.doWith(c.httpClient, method, path, body)
+}
+
+// doWith is the single request path; the caller chooses which client bounds
+// it. Only InvokeFunction passes longClient — everything else goes through
+// do and the fail-fast default.
+func (c *Client) doWith(hc *http.Client, method, path string, body interface{}) ([]byte, int, error) {
 	var reqBody io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -52,7 +73,7 @@ func (c *Client) do(method, path string, body interface{}) ([]byte, int, error) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -385,7 +406,7 @@ type InvokeResponse struct {
 }
 
 func (c *Client) InvokeFunction(projectID, name string, body map[string]interface{}) (*InvokeResponse, error) {
-	data, _, err := c.do("POST", "/v1/projects/"+projectID+"/functions/"+name+"/invoke", InvokeRequest{Body: body})
+	data, _, err := c.doWith(c.longClient, "POST", "/v1/projects/"+projectID+"/functions/"+name+"/invoke", InvokeRequest{Body: body})
 	if err != nil {
 		return nil, err
 	}
