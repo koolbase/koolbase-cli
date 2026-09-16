@@ -201,3 +201,38 @@ func TestTestDirectoryIsNotStripped(t *testing.T) {
 		t.Error("a stray top-level generated/ was created")
 	}
 }
+
+func TestUnexpectedFilesInGeneratedAreNamed(t *testing.T) {
+	// A file the developer put inside a generated root. The swap
+	// replaces the whole tree, so it would be deleted -- and the
+	// backup makes that recoverable only for someone who knows the
+	// backup exists. Say it before, not after.
+	dir := t.TempDir()
+	z := makeExport(t, "doc_a", map[string]string{"home.dart": "class Home {}\n"}, "")
+	applyExport(z, dir, false, &bytes.Buffer{})
+
+	mine := filepath.Join(dir, "lib/generated/screens/my_helper.dart")
+	os.WriteFile(mine, []byte("// mine\n"), 0o644)
+
+	var out bytes.Buffer
+	err := applyExport(z, dir, false, &out)
+	if err == nil {
+		t.Fatal("expected apply to stop on an unexpected file")
+	}
+	if !strings.Contains(out.String(), "my_helper.dart") {
+		t.Errorf("unexpected file not named:\n%s", out.String())
+	}
+	if read(t, dir, "lib/generated/screens/my_helper.dart") != "// mine\n" {
+		t.Error("the file was removed despite the stop")
+	}
+
+	// --force replaces the tree, which removes it. That is the
+	// contract -- the directory is Koolbase's -- and the point of the
+	// stop is that nobody reaches it by accident.
+	if err := applyExport(z, dir, true, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mine); err == nil {
+		t.Error("--force should have replaced the tree")
+	}
+}

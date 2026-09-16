@@ -120,6 +120,19 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 	// the PREVIOUS manifest's hashes: a file whose bytes differ from what
 	// Koolbase last wrote was touched by someone. Named, never merged.
 	edited := detectEdits(prev, into)
+
+	// A file of theirs inside a generated root. The swap would delete
+	// it, so say so before that happens rather than after.
+	if unexpected := detectUnexpected(prev, into); len(unexpected) > 0 && !force {
+		fmt.Fprintln(out, "Files inside lib/generated/ that Koolbase did not write:")
+		for _, p := range unexpected {
+			fmt.Fprintf(out, "  %s\n", p)
+		}
+		fmt.Fprintln(out, "\nRe-export replaces the whole generated tree and would remove them.")
+		fmt.Fprintln(out, "Move them outside lib/generated/, or run again with --force.")
+		return fmt.Errorf("stopped: %d unexpected file(s) in the generated tree", len(unexpected))
+	}
+
 	if len(edited) > 0 && !force {
 		fmt.Fprintln(out, "Generated files were edited by hand since the last export:")
 		for _, p := range edited {
@@ -246,6 +259,42 @@ func detectEdits(prev exportManifest, into string) []string {
 	}
 	sort.Strings(edited)
 	return edited
+}
+
+// detectUnexpected finds files inside a generated root that the
+// previous manifest never listed.
+//
+// The swap replaces a root wholesale, so anything in there that
+// Koolbase did not write is deleted. The contract says the directory is
+// Koolbase's, and the backup makes it recoverable -- but a developer
+// who put a file there and lost it without being told would be right to
+// be angry, and "you should have read the header comment" is not an
+// answer.
+func detectUnexpected(prev exportManifest, into string) []string {
+	known := map[string]bool{}
+	for _, f := range prev.GeneratedFiles {
+		known[filepath.Clean(f.Path)] = true
+	}
+
+	var found []string
+	for _, root := range prev.GeneratedRoots {
+		dir := filepath.Join(into, filepath.Clean(root))
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			rel, relErr := filepath.Rel(into, path)
+			if relErr != nil {
+				return nil
+			}
+			if !known[filepath.Clean(rel)] {
+				found = append(found, filepath.ToSlash(rel))
+			}
+			return nil
+		})
+	}
+	sort.Strings(found)
+	return found
 }
 
 func reportPubspecDelta(incoming map[string][]byte, into string, out io.Writer) {
