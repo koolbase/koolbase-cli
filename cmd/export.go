@@ -58,7 +58,8 @@ var exportApplyCmd = &cobra.Command{
 	Long: `Applies a Koolbase Designer export to a project directory.
 
 On a fresh directory every file is written. On an existing project only
-lib/generated/ is replaced; main.dart, pubspec.yaml and anything you have
+the generated folders are replaced (lib/generated/ for Flutter; src/generated/
+and app/(koolbase)/ for Expo); main.dart, pubspec.yaml, package.json and anything you have
 added are never touched. If generated files were edited by hand since the
 last export, they are listed and the apply stops unless --force is given.`,
 	Args: cobra.ExactArgs(1),
@@ -104,7 +105,7 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 	}
 
 	if fresh {
-		return applyFresh(incoming, into, out)
+		return applyFresh(incoming, next.GeneratedRoots, into, out)
 	}
 
 	var prev exportManifest
@@ -124,12 +125,12 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 	// A file of theirs inside a generated root. The swap would delete
 	// it, so say so before that happens rather than after.
 	if unexpected := detectUnexpected(prev, into); len(unexpected) > 0 && !force {
-		fmt.Fprintln(out, "Files inside lib/generated/ that Koolbase did not write:")
+		fmt.Fprintf(out, "Files inside %s that Koolbase did not write:\n", rootsText(next.GeneratedRoots))
 		for _, p := range unexpected {
 			fmt.Fprintf(out, "  %s\n", p)
 		}
 		fmt.Fprintln(out, "\nRe-export replaces the whole generated tree and would remove them.")
-		fmt.Fprintln(out, "Move them outside lib/generated/, or run again with --force.")
+		fmt.Fprintf(out, "Move them outside %s, or run again with --force.\n", rootsText(next.GeneratedRoots))
 		return fmt.Errorf("stopped: %d unexpected file(s) in the generated tree", len(unexpected))
 	}
 
@@ -138,7 +139,7 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 		for _, p := range edited {
 			fmt.Fprintf(out, "  %s\n", p)
 		}
-		fmt.Fprintln(out, "\nRe-export replaces them. Move your changes outside lib/generated/,")
+		fmt.Fprintf(out, "\nRe-export replaces them. Move your changes outside %s,\n", rootsText(next.GeneratedRoots))
 		fmt.Fprintln(out, "or run again with --force to discard them.")
 		return fmt.Errorf("stopped: %d generated file(s) edited", len(edited))
 	}
@@ -146,7 +147,7 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 	return applyReplace(incoming, next, prev, into, edited, out)
 }
 
-func applyFresh(incoming map[string][]byte, into string, out io.Writer) error {
+func applyFresh(incoming map[string][]byte, roots []string, into string, out io.Writer) error {
 	paths := sortedKeys(incoming)
 	for _, p := range paths {
 		if err := writeFile(filepath.Join(into, p), incoming[p]); err != nil {
@@ -154,8 +155,8 @@ func applyFresh(incoming map[string][]byte, into string, out io.Writer) error {
 		}
 	}
 	fmt.Fprintf(out, "Exported %d files into %s\n", len(paths), into)
-	fmt.Fprintln(out, "\nlib/generated/ is Koolbase's and is replaced on re-export.")
-	fmt.Fprintln(out, "Everything else is yours; build outside lib/generated/.")
+	fmt.Fprintf(out, "\n%s: Koolbase's, replaced on re-export.\n", rootsText(roots))
+	fmt.Fprintf(out, "Everything else is yours; build outside %s.\n", rootsText(roots))
 	return nil
 }
 
@@ -205,6 +206,7 @@ func applyReplace(incoming map[string][]byte, next, prev exportManifest, into st
 	// change between exports, and silently rewriting it would break the
 	// rule the moment it was convenient. Report the delta instead.
 	reportPubspecDelta(incoming, into, out)
+	reportPackageJSONDelta(incoming, into, out)
 	fmt.Fprintln(out, "\nDeveloper files untouched: "+strings.Join(next.OwnedByDeveloper, ", "))
 	return nil
 }
@@ -430,4 +432,76 @@ func sortedKeys(m map[string][]byte) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// reportPackageJSONDelta is the Expo twin of reportPubspecDelta. package.json
+// is the developer's, so a dependency the generated code now needs is
+// reported, never written. Only an export that carries a package.json (an
+// Expo export) reaches past the first check; Flutter exports never do.
+func reportPackageJSONDelta(incoming map[string][]byte, into string, out io.Writer) {
+	want, ok := incoming["package.json"]
+	if !ok {
+		return
+	}
+	have, err := os.ReadFile(filepath.Join(into, "package.json"))
+	if err != nil {
+		return
+	}
+	wantDeps, err1 := npmDepsOf(want)
+	haveDeps, err2 := npmDepsOf(have)
+	if err1 != nil || err2 != nil {
+		fmt.Fprintln(out, "\nCould not read package.json to compare dependencies; check them by hand.")
+		return
+	}
+	var missing, names []string
+	for d, v := range wantDeps {
+		if _, ok := haveDeps[d]; !ok {
+			missing = append(missing, d+": "+v)
+			names = append(names, d)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sort.Strings(missing)
+	sort.Strings(names)
+	fmt.Fprintln(out, "\nGenerated code now needs dependencies your package.json does not list:")
+	for _, m := range missing {
+		fmt.Fprintf(out, "  %s\n", m)
+	}
+	fmt.Fprintf(out, "package.json is yours; add them with `npx expo install %s`.\n", strings.Join(names, " "))
+}
+
+// npmDepsOf reads a package.json's dependencies and devDependencies,
+// name -> version.
+func npmDepsOf(pkg []byte) (map[string]string, error) {
+	var p struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(pkg, &p); err != nil {
+		return nil, err
+	}
+	deps := map[string]string{}
+	for k, v := range p.Dependencies {
+		deps[k] = v
+	}
+	for k, v := range p.DevDependencies {
+		deps[k] = v
+	}
+	return deps, nil
+}
+
+// rootsText names the export's generated roots for a message, from the
+// manifest -- never a hard-coded path, since Flutter and Expo exports own
+// different folders.
+func rootsText(roots []string) string {
+	switch len(roots) {
+	case 0:
+		return "the generated folders"
+	case 1:
+		return roots[0]
+	default:
+		return strings.Join(roots[:len(roots)-1], ", ") + " and " + roots[len(roots)-1]
+	}
 }
