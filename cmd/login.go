@@ -103,11 +103,14 @@ func runGoogleLogin(ctx context.Context) error {
 		return err
 	}
 
+	// Read before saving: the new session replaces it.
+	prev := previousSessionEmail()
 	if err := saveSession(resp); err != nil {
 		return err
 	}
 
 	fmt.Printf("\n Logged in as %s\n", resp.User.Email)
+	fmt.Print(loginNotes("Google", googleTokenEmail(result.IDToken), resp.User.Email, prev))
 	fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
 	return nil
 }
@@ -135,11 +138,14 @@ func runGitHubLogin(ctx context.Context) error {
 		return err
 	}
 
+	// Read before saving: the new session replaces it.
+	prev := previousSessionEmail()
 	if err := saveSession(resp); err != nil {
 		return err
 	}
 
 	fmt.Printf("\n Logged in as %s\n", resp.User.Email)
+	fmt.Print(loginNotes("GitHub", "", resp.User.Email, prev))
 	fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
 	return nil
 }
@@ -170,11 +176,14 @@ func runPasswordLogin() error {
 		return err
 	}
 
+	// Read before saving: the new session replaces it.
+	prev := previousSessionEmail()
 	if err := saveSession(resp); err != nil {
 		return err
 	}
 
 	fmt.Printf("\n Logged in as %s\n", resp.User.Email)
+	fmt.Print(loginNotes("", "", resp.User.Email, prev))
 	fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
 	return nil
 }
