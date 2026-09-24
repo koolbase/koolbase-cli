@@ -116,13 +116,14 @@ type applyResult struct {
 	DryRun          bool   `json:"dry_run"`
 	Status          string `json:"status"`
 
-	Collections  []itemResult    `json:"collections"`
-	Buckets      []itemResult    `json:"buckets"`
-	Secrets      []itemResult    `json:"secrets"`
-	Functions    []itemResult    `json:"functions"`
-	Crons        []itemResult    `json:"crons"`
-	Triggers     []itemResult    `json:"triggers"`
-	Environments []envItemResult `json:"environments"`
+	Collections       []itemResult    `json:"collections"`
+	Buckets           []itemResult    `json:"buckets"`
+	Secrets           []itemResult    `json:"secrets"`
+	Functions         []itemResult    `json:"functions"`
+	Crons             []itemResult    `json:"crons"`
+	Triggers          []itemResult    `json:"triggers"`
+	UniqueConstraints []itemResult    `json:"unique_constraints"`
+	Environments      []envItemResult `json:"environments"`
 
 	SecretsNeedingValues []string `json:"secrets_needing_values"`
 	SkippedEnvironments  []string `json:"skipped_environments"`
@@ -252,6 +253,7 @@ var snapshotApplyCmd = &cobra.Command{
 		fmt.Printf("%s project %s (snapshot v%d)\n\n", mode, res.TargetProjectID, res.SnapshotVersion)
 
 		printSection("Collections", res.Collections, snapshotVerbose)
+		printSection("Unique constraints", res.UniqueConstraints, snapshotVerbose)
 		printSection("Buckets", res.Buckets, snapshotVerbose)
 		printSection("Secrets", res.Secrets, snapshotVerbose)
 		printSection("Functions", res.Functions, snapshotVerbose)
