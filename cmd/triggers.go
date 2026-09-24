@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
@@ -39,13 +40,13 @@ var triggersListCmd = &cobra.Command{
 		}
 		if len(triggers) == 0 {
 			fmt.Println("No triggers found.")
-			fmt.Println("Create one with: koolbase triggers create --function <name> --event <insert|update|delete> --collection <name> --project <id>")
+			fmt.Println("Create one with: koolbase triggers create --function <name> --event <event, e.g. db.record.created> [--collection <collection or bucket>]")
 			return nil
 		}
 
-		fmt.Printf("%-38s %-20s %-10s %-16s %-8s %s\n",
+		fmt.Printf("%-38s %-20s %-24s %-16s %-8s %s\n",
 			"ID", "FUNCTION", "EVENT", "COLLECTION", "ENABLED", "CREATED")
-		fmt.Printf("%-38s %-20s %-10s %-16s %-8s %s\n",
+		fmt.Printf("%-38s %-20s %-24s %-16s %-8s %s\n",
 			"--", "--------", "-----", "----------", "-------", "-------")
 		for _, t := range triggers {
 			collection := t.Collection
@@ -56,7 +57,7 @@ var triggersListCmd = &cobra.Command{
 			if t.Enabled {
 				enabled = "yes"
 			}
-			fmt.Printf("%-38s %-20s %-10s %-16s %-8s %s\n",
+			fmt.Printf("%-38s %-20s %-24s %-16s %-8s %s\n",
 				t.ID, t.FunctionName, t.EventType, collection, enabled, formatTime(t.CreatedAt))
 		}
 		return nil
@@ -64,9 +65,15 @@ var triggersListCmd = &cobra.Command{
 }
 
 var triggersCreateCmd = &cobra.Command{
-	Use:     "create",
-	Short:   "Create a database event trigger",
-	Example: `  koolbase triggers create --function notify --event insert --collection orders --project proj_123`,
+	Use:   "create",
+	Short: "Create an event trigger (database, storage or auth)",
+	Long: "Binds a function to an event. The server validates the event and lists every supported one if it does not recognise it.\n\n" +
+		"Common events: db.record.created, db.record.updated, db.record.deleted, storage.object.created, auth.user.registered.\n" +
+		"insert, update and delete are accepted as short names for the db.record.* events.\n\n" +
+		"db.* and storage.* events need --collection (the collection, or the bucket for storage). auth.* events are project-wide.",
+	Example: `  koolbase triggers create --function notify --event db.record.created --collection orders
+  koolbase triggers create --function resize --event storage.object.created --collection avatars
+  koolbase triggers create --function welcome --event auth.user.registered`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -89,8 +96,9 @@ var triggersCreateCmd = &cobra.Command{
 		if eventType == "" {
 			return fmt.Errorf("--event is required")
 		}
-		if collection == "" {
-			return fmt.Errorf("--collection is required")
+		eventType = resolveTriggerEvent(eventType)
+		if triggerNeedsTarget(eventType) && collection == "" {
+			return fmt.Errorf("--collection is required for %s (the collection for db.* events, the bucket for storage.* events)", eventType)
 		}
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
@@ -100,7 +108,11 @@ var triggersCreateCmd = &cobra.Command{
 		}
 		if trigger != nil && trigger.ID != "" {
 			fmt.Printf("Trigger created: %s\n", trigger.ID)
-			fmt.Printf("  %s fires on %s events in %s\n", functionName, eventType, collection)
+			if triggerNeedsTarget(eventType) {
+				fmt.Printf("  %s fires on %s in %s\n", functionName, eventType, collection)
+			} else {
+				fmt.Printf("  %s fires on %s\n", functionName, eventType)
+			}
 		} else {
 			fmt.Println("Trigger created.")
 		}
@@ -188,8 +200,8 @@ func init() {
 
 	triggersCreateCmd.Flags().StringP("project", "p", "", "Project ID")
 	triggersCreateCmd.Flags().String("function", "", "Function name to invoke (required)")
-	triggersCreateCmd.Flags().String("event", "", "DB event the trigger fires on, e.g. insert/update/delete (required)")
-	triggersCreateCmd.Flags().String("collection", "", "Collection the trigger watches (required)")
+	triggersCreateCmd.Flags().String("event", "", "Event to fire on, e.g. db.record.created, storage.object.created, auth.user.registered; insert/update/delete also work for db.record.* (required)")
+	triggersCreateCmd.Flags().String("collection", "", "Collection (db.* events) or bucket (storage.* events) to watch; not used for auth.* events")
 
 	triggersDeleteCmd.Flags().StringP("project", "p", "", "Project ID")
 
@@ -199,4 +211,28 @@ func init() {
 	triggersCmd.AddCommand(triggersCreateCmd)
 	triggersCmd.AddCommand(triggersDeleteCmd)
 	triggersCmd.AddCommand(triggersStatsCmd)
+}
+
+// triggerEventAliases maps the short names this command's help once taught to
+// the event names the server accepts. Anything else passes through unchanged:
+// the server validates it and lists every supported event, so the CLI keeps
+// no copy of that list to drift out of date.
+var triggerEventAliases = map[string]string{
+	"insert": "db.record.created",
+	"update": "db.record.updated",
+	"delete": "db.record.deleted",
+}
+
+func resolveTriggerEvent(event string) string {
+	e := strings.TrimSpace(event)
+	if full, ok := triggerEventAliases[strings.ToLower(e)]; ok {
+		return full
+	}
+	return e
+}
+
+// triggerNeedsTarget reports whether an event is bound to a collection (db.*)
+// or a bucket (storage.*). auth.* events are project-wide and take no target.
+func triggerNeedsTarget(event string) bool {
+	return strings.HasPrefix(event, "db.") || strings.HasPrefix(event, "storage.")
 }
