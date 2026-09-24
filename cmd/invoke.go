@@ -50,8 +50,10 @@ var invokeCmd = &cobra.Command{
 		}
 
 		if resp.Error != "" {
-			fmt.Printf(" Error: %s\n", resp.Error)
-			return nil
+			fmt.Print(formatInvokeFailure(resp))
+			// A failed function must fail the command, so scripts and CI notice.
+			cmd.SilenceUsage = true
+			return fmt.Errorf("function %s failed", name)
 		}
 
 		output, _ := json.MarshalIndent(resp.Body, "", "  ")

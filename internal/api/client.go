@@ -424,6 +424,10 @@ type InvokeResponse struct {
 	Body   map[string]interface{} `json:"body"`
 	LogID  string                 `json:"log_id"`
 	Error  string                 `json:"error"`
+	// Sent by the server when the function itself failed: which ctx.db call,
+	// its HTTP status, collection and record. Error alone is the bare message.
+	ErrorStructured json.RawMessage `json:"error_structured,omitempty"`
+	StackTrace      string          `json:"stack_trace,omitempty"`
 }
 
 func (c *Client) InvokeFunction(projectID, name string, body map[string]interface{}) (*InvokeResponse, error) {
