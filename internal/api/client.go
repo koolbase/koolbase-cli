@@ -109,6 +109,11 @@ func (c *Client) doWith(hc *http.Client, method, path string, body interface{}) 
 				}
 			}
 		}
+		if isAuthPath(path) {
+			// Sign-in answers carry the server's own reason ("please verify your
+			// email", "invalid email or password"); Login formats it.
+			return data, resp.StatusCode, nil
+		}
 		return data, resp.StatusCode, authError(resp.StatusCode)
 	}
 
@@ -1809,4 +1814,12 @@ func (c *Client) RevokeKey(orgID, keyID string) error {
 		return fmt.Errorf("revoke key failed (%d): %s", status, string(data))
 	}
 	return nil
+}
+
+// isAuthPath reports sign-in and sign-up endpoints. Their 401/403 answers carry
+// the server's own reason and are formatted by Login, LoginWithGoogle and
+// LoginWithGitHub. The generic authError wording is about a signed-in account
+// and a project; before sign-in there is neither, so it hid the real reason.
+func isAuthPath(p string) bool {
+	return len(p) >= 9 && p[:9] == "/v1/auth/"
 }
