@@ -247,7 +247,7 @@ func printSeedResult(c api.SeedCollection, res api.SeedApplyResult, dryRun bool)
 
 func init() {
 	for _, c := range []*cobra.Command{seedPlanCmd, seedApplyCmd} {
-		c.Flags().StringVar(&seedProject, "project", "", "target project ID (required)")
+		c.Flags().StringVarP(&seedProject, "project", "p", "", "target project ID (required)")
 		c.Flags().StringVar(&seedDir, "dir", defaultSeedDir, "directory holding manifest.json")
 		c.Flags().StringVar(&seedCollectionName, "collection", "", "apply only this collection")
 		c.Flags().BoolVarP(&seedVerbose, "verbose", "v", false, "list every row, not just those needing attention")
@@ -258,6 +258,14 @@ func init() {
 	seedApplyCmd.Flags().StringVar(&seedOnConflict, "on-conflict", "fail", "fail, keep-existing, or overwrite")
 	seedApplyCmd.Flags().BoolVar(&seedForceConflicts, "force-conflicts", false, "overwrite rows that changed in the target too")
 	seedApplyCmd.Flags().BoolVar(&seedAdoptExisting, "adopt-existing", false, "take ownership of rows already present under a seeded key")
+	// Seeded records do not fire database triggers (bulk seeding a collection
+	// should not send an email or call a webhook per row). Say so, and name the
+	// command that runs a trigger for them. On stderr, so piped output is clean;
+	// PostRun only runs after a successful apply.
+	seedApplyCmd.PostRun = func(cmd *cobra.Command, args []string) {
+		fmt.Fprintln(os.Stderr, "Note: seeded records don't fire database triggers. To run a trigger for them:")
+		fmt.Fprintln(os.Stderr, "  koolbase triggers replay <trigger-id> -p <project>   (find ids with: koolbase triggers list)")
+	}
 
 	seedCmd.AddCommand(seedValidateCmd, seedPlanCmd, seedApplyCmd)
 	rootCmd.AddCommand(seedCmd)

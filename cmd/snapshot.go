@@ -319,11 +319,11 @@ var snapshotApplyCmd = &cobra.Command{
 }
 
 func init() {
-	snapshotPullCmd.Flags().StringVar(&snapshotProject, "project", "", "project ID to export from (required)")
+	snapshotPullCmd.Flags().StringVarP(&snapshotProject, "project", "p", "", "project ID to export from (required)")
 	snapshotPullCmd.Flags().StringVarP(&snapshotOutput, "output", "o", "", "output file (default: koolbase.json; use '-' for stdout)")
 	snapshotPullCmd.MarkFlagRequired("project")
 
-	snapshotApplyCmd.Flags().StringVar(&snapshotProject, "project", "", "target project ID to apply to (required)")
+	snapshotApplyCmd.Flags().StringVarP(&snapshotProject, "project", "p", "", "target project ID to apply to (required)")
 	snapshotApplyCmd.Flags().StringVarP(&snapshotFile, "file", "f", defaultManifest, "backend definition file to apply (default: koolbase.json)")
 	snapshotApplyCmd.Flags().BoolVar(&snapshotDryRun, "dry-run", false, "preview the diff without writing")
 	snapshotApplyCmd.Flags().BoolVarP(&snapshotVerbose, "verbose", "v", false, "list every item, not just those needing attention")

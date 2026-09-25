@@ -524,7 +524,7 @@ func generateNativeSplash(appName string) {
 }
 
 func init() {
-	createCmd.Flags().StringVar(&createProjectID, "project", "", "Koolbase project ID to wire the app to (skips the picker)")
+	createCmd.Flags().StringVarP(&createProjectID, "project", "p", "", "Koolbase project ID to wire the app to (skips the picker)")
 	createCmd.Flags().StringVar(&createOrg, "org", "", "organization ID (defaults to your own)")
 	createCmd.Flags().BoolVar(&createFlavors, "flavors", false, "generate dev/staging/prod flavor configs")
 	createCmd.Flags().BoolVar(&createSkipPub, "skip-pub-get", false, "do not run flutter pub get after scaffolding")
