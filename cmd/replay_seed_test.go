@@ -2,8 +2,8 @@ package cmd
 
 import "testing"
 
-// GEA #15: seeded records don't fire triggers, so seed apply says so and points
-// to triggers replay, which must stay registered with the flags it documents.
+// Seeded records don't fire triggers, so seed apply says so and points to
+// triggers replay, which must stay registered with the flags it documents.
 func TestTriggersReplayAndSeedNote(t *testing.T) {
 	found := false
 	for _, c := range triggersCmd.Commands() {
