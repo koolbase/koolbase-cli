@@ -75,7 +75,7 @@ holds a file Koolbase did not write, this stops and names them.`,
 }
 
 func init() {
-	pullCmd.Flags().String("project", "", "project id (defaults to the linked project)")
+	pullCmd.Flags().StringP("project", "p", "", "project id (defaults to the linked project)")
 	pullCmd.Flags().String("into", ".", "the Flutter project to apply into")
 	pullCmd.Flags().Bool("force", false, "replace the generated tree even if it was edited")
 	rootCmd.AddCommand(pullCmd)

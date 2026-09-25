@@ -660,7 +660,7 @@ func init() {
 	releaseCmd.Flags().StringVar(&releaseFlutterSDK, "flutter-sdk", "", "Path to a version-matched Flutter SDK")
 	releaseCmd.Flags().StringSliceVar(&releaseArchs, "target-archs", []string{"arm64", "arm"}, "Target ABIs (comma-separated): arm64,arm")
 	releaseCmd.Flags().BoolVar(&releaseNoTreeShake, "no-tree-shake-icons", false, "Disable icon tree-shaking")
-	releaseCmd.Flags().StringVar(&releaseProject, "project", "", "Koolbase project/app ID (defaults to saved config)")
+	releaseCmd.Flags().StringVarP(&releaseProject, "project", "p", "", "Koolbase project/app ID (defaults to saved config)")
 	releaseCmd.Flags().BoolVar(&releaseNoRegister, "no-register", false, "Build without registering build_ids (produces an UNPATCHABLE AAB; for local testing/CI only)")
 	releaseCmd.Flags().StringVar(&releaseChannel, "channel", "stable", "Release channel for the registered releases")
 	releaseCmd.Flags().StringVar(&releaseFlavor, "flavor", "", "Build flavor (e.g. prod); selects the gradle product flavor and shapes output paths")

@@ -247,7 +247,7 @@ func printSeedResult(c api.SeedCollection, res api.SeedApplyResult, dryRun bool)
 
 func init() {
 	for _, c := range []*cobra.Command{seedPlanCmd, seedApplyCmd} {
-		c.Flags().StringVar(&seedProject, "project", "", "target project ID (required)")
+		c.Flags().StringVarP(&seedProject, "project", "p", "", "target project ID (required)")
 		c.Flags().StringVar(&seedDir, "dir", defaultSeedDir, "directory holding manifest.json")
 		c.Flags().StringVar(&seedCollectionName, "collection", "", "apply only this collection")
 		c.Flags().BoolVarP(&seedVerbose, "verbose", "v", false, "list every row, not just those needing attention")

@@ -258,7 +258,7 @@ var _ = bufio.NewReader
 
 func init() {
 	addCmd.Flags().BoolVar(&addForce, "force", false, "overwrite existing files")
-	addCmd.Flags().StringVar(&addProject, "project", "", "Koolbase project ID (when the app has no koolbase_config.dart)")
+	addCmd.Flags().StringVarP(&addProject, "project", "p", "", "Koolbase project ID (when the app has no koolbase_config.dart)")
 	addCmd.Flags().StringVar(&addDir, "dir", ".", "the Flutter project to add to")
 	addCmd.Flags().BoolVarP(&addYes, "yes", "y", false, "create backend resources without confirming")
 }
