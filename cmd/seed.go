@@ -207,12 +207,29 @@ func runSeed(dryRun bool) error {
 // human must act on. A two hundred row country list should not bury its one
 // conflict.
 func printSeedResult(c api.SeedCollection, res api.SeedApplyResult, dryRun bool) {
+	// After a real apply, a conflict the chosen option resolved is reported as
+	// what was done to it, not as a conflict still waiting for a decision.
+	resolved := ""
+	if !dryRun {
+		switch {
+		case seedOnConflict == "keep-existing":
+			resolved = "kept"
+		case seedOnConflict == "overwrite" && seedForceConflicts:
+			resolved = "overwritten"
+		}
+	}
+	effective := func(a string) string {
+		if a == "conflict" && resolved != "" {
+			return resolved
+		}
+		return a
+	}
 	counts := map[string]int{}
 	for _, p := range res.Plan {
-		counts[p.Action]++
+		counts[effective(p.Action)]++
 	}
 	parts := []string{}
-	for _, a := range []string{"create", "recreate", "update", "unchanged", "drifted", "conflict", "adopt", "invalid"} {
+	for _, a := range []string{"create", "recreate", "update", "overwritten", "kept", "unchanged", "drifted", "conflict", "adopt", "invalid"} {
 		if counts[a] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[a], a))
 		}
@@ -220,14 +237,15 @@ func printSeedResult(c api.SeedCollection, res api.SeedApplyResult, dryRun bool)
 	fmt.Printf("%s: %s\n", c.Name, strings.Join(parts, " · "))
 
 	for _, p := range res.Plan {
-		needs := p.Action == "conflict" || p.Action == "drifted" || p.Action == "adopt" || p.Action == "invalid"
+		act := effective(p.Action)
+		needs := act == "conflict" || act == "drifted" || act == "adopt" || act == "invalid"
 		if !needs && !seedVerbose {
 			continue
 		}
 		glyph := map[string]string{
 			"create": "+", "recreate": "+", "update": "~", "unchanged": "=",
-			"conflict": "!", "drifted": "!", "adopt": "!", "invalid": "✗",
-		}[p.Action]
+			"conflict": "!", "drifted": "!", "adopt": "!", "invalid": "✗", "kept": "=", "overwritten": "~",
+		}[act]
 		fmt.Printf("  %s %s\n", glyph, strings.Join(p.KeyValue, " / "))
 		if p.Detail != "" {
 			fmt.Printf("      %s\n", p.Detail)
